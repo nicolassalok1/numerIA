@@ -1,0 +1,8 @@
+__pycache__/
+*.pkl
+*.parquet
+.env
+models/
+!models/.gitkeep
+data/
+!data/.gitkeep

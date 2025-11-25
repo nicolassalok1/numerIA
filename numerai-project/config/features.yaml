@@ -1,0 +1,5 @@
+# Feature configuration for Numerai training
+features:
+  numeric: ["feature1", "feature2", "feature3"]
+  categorical: []
+target: "target"

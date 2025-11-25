@@ -1,0 +1,17 @@
+# Training configuration parameters
+paths:
+  train: "data/train.parquet"
+  validation: "data/validation.parquet"
+  tournament: "data/tournament.parquet"
+  output_dir: "models"
+
+cv:
+  folds: 5
+  shuffle: true
+  random_state: 42
+
+target: "target"
+
+compute:
+  n_jobs: -1
+  seed: 42
