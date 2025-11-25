@@ -64,8 +64,8 @@ def load_models(models_dir: Path, params: Dict[str, Any]) -> Tuple[Dict[str, Any
     return models, stk
 
 
-def load_features(training_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, str, Path]:
-    """Load tournament features and infer feature prefix."""
+def load_features(training_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.Series, Path]:
+    """Load tournament features and ids."""
     tournament_path = Path(training_cfg.get("files", {}).get("tournament", "data/numerai_tournament_data.parquet"))
     if not tournament_path.is_absolute():
         tournament_path = PROJECT_ROOT / tournament_path
@@ -78,12 +78,24 @@ def load_features(training_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) ->
         df, _ = utils.dummy_dataset(prefix=feature_prefix)
         feature_cols = utils.get_feature_columns(df, feature_prefix)
 
-    return df[feature_cols], feature_prefix, Path(tournament_path)
+    id_col = None
+    for candidate in ["id", "prediction_id", "row_id", "tournament_id"]:
+        if candidate in df.columns:
+            id_col = candidate
+            break
+    if id_col is None:
+        # fallback: utilise la première colonne non-feature ou un index
+        non_feature_cols = [c for c in df.columns if c not in feature_cols]
+        ids = df[non_feature_cols[0]].reset_index(drop=True) if non_feature_cols else pd.Series(range(len(df)), name="id")
+    else:
+        ids = df[id_col].reset_index(drop=True)
+
+    return df[feature_cols], ids, Path(tournament_path)
 
 
 def predict(models_dir: Path, training_cfg: Dict[str, Any], params_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) -> pd.DataFrame:
     """Generate predictions and save submission file."""
-    features_df, feature_prefix, tournament_path = load_features(training_cfg, features_cfg)
+    features_df, ids, tournament_path = load_features(training_cfg, features_cfg)
     models, stk = load_models(models_dir, params_cfg)
 
     preds: Dict[str, pd.Series] = {}
@@ -96,7 +108,7 @@ def predict(models_dir: Path, training_cfg: Dict[str, Any], params_cfg: Dict[str
         final_pred = stk.predict(base_pred_df)
     except Exception:
         final_pred = base_pred_df.mean(axis=1)
-    submission = final_pred.to_frame(name="prediction")
+    submission = pd.DataFrame({"id": ids, "prediction": final_pred.values})
 
     submission_path = Path(training_cfg.get("files", {}).get("submission", "submission.csv"))
     if not submission_path.is_absolute():

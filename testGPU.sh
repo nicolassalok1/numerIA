@@ -1,36 +1,46 @@
-python3 - << 'EOF'
-import torch, tensorflow as tf, sklearn, subprocess
+#!/usr/bin/env bash
+set -euo pipefail
 
-print("\n========================")
-print("🔍 TEST GPU GLOBAL")
-print("========================")
+echo "=== ENVIRONNEMENT PYTHON ==="
+echo "Conda env : ${CONDA_DEFAULT_ENV:-<inconnu>}"
+echo "Python    : $(which python)"
 
-# --- NVIDIA-SMI ---
-print("\n📌 nvidia-smi:")
+echo
+echo "=== GPU via nvidia-smi ==="
+if command -v nvidia-smi >/dev/null 2>&1; then
+  nvidia-smi
+else
+  echo "nvidia-smi introuvable (driver NVIDIA non détecté dans cet env)."
+fi
+
+echo
+echo "=== Test LightGBM avec device='gpu' ==="
+python - <<'PY'
+import numpy as np
+
 try:
-    print(subprocess.check_output("nvidia-smi", shell=True, text=True))
+    import lightgbm as lgb
 except Exception as e:
-    print("nvidia-smi ERROR:", e)
+    print("LightGBM non importable :", e)
+else:
+    print("LightGBM version :", lgb.__version__)
+    print("Config device_type :", lgb.basic._ConfigAliases().get("device_type", "unknown"))
 
-# --- PyTorch ---
-print("\n📌 PyTorch:")
-print("Version :", torch.__version__)
-print("CUDA disponible :", torch.cuda.is_available())
-if torch.cuda.is_available():
-    print("GPU :", torch.cuda.get_device_name(0))
+    X = np.random.rand(10000, 10)
+    y = np.random.rand(10000)
 
-# --- TensorFlow ---
-print("\n📌 TensorFlow:")
-print("Version :", tf.__version__)
-gpus = tf.config.list_physical_devices('GPU')
-print("GPU détecté :", len(gpus) > 0)
-print("Liste des GPU :", gpus)
+    try:
+        model = lgb.LGBMRegressor(
+            device="gpu",
+            n_estimators=10,
+            max_depth=4,
+            num_leaves=31,
+        )
+        model.fit(X, y)
+        print(">>> GPU LightGBM OK : entraînement terminé avec device='gpu'.")
+    except Exception as e:
+        print(">>> GPU LightGBM KO :", repr(e))
+PY
 
-# --- Scikit-Learn ---
-print("\n📌 Scikit-Learn:")
-print("Version :", sklearn.__version__)
-
-print("\n========================")
-print("✔ TEST TERMINÉ")
-print("========================\n")
-EOF
+echo
+echo "=== FIN DU TEST GPU PYTHON ==="
