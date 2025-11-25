@@ -12,9 +12,14 @@ from src import predict, utils  # noqa: E402
 
 def build_submission() -> Path:
     """Create a submission file from model predictions."""
-    predictions = predict.predict()
-    output_path = Path("models/submission.csv")
-    return utils.save_submission(predictions, output_path)
+    training_cfg = utils.load_yaml(PROJECT_ROOT / "config" / "training.yaml") or {}
+    params_cfg = utils.load_yaml(PROJECT_ROOT / "config" / "model_params.yaml") or {}
+    features_cfg = utils.load_yaml(PROJECT_ROOT / "config" / "features.yaml") or {}
+
+    models_dir = PROJECT_ROOT / "models"
+    predict.predict(models_dir, training_cfg, params_cfg, features_cfg)
+    submission_path = Path(training_cfg.get("files", {}).get("submission", "submission.csv"))
+    return PROJECT_ROOT / submission_path
 
 
 def main() -> None:

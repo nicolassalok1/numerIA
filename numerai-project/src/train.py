@@ -1,11 +1,15 @@
-"""Training entrypoint for Numerai models."""
-from pathlib import Path
-from typing import Dict, Any
+"""Training entrypoint for Numerai models with KFold stacking."""
+from __future__ import annotations
+
 import argparse
 import sys
+from pathlib import Path
+from typing import Dict, Any, Tuple
 
+import joblib
+import numpy as np
 import pandas as pd
-import yaml
+from sklearn.model_selection import KFold
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -14,63 +18,115 @@ if str(PROJECT_ROOT) not in sys.path:
 from src import model_lgb, model_mlp, model_ridge, stacker, utils  # noqa: E402
 
 
-def load_config(config_path: str | Path) -> Dict[str, Any]:
-    """Load YAML configuration file."""
-    path = Path(config_path)
-    with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def load_data(train_path: str | Path) -> pd.DataFrame:
-    """Load training data placeholder."""
-    path = Path(train_path)
-    if not path.exists():
-        # Minimal placeholder dataframe
-        return pd.DataFrame()
-    return pd.read_parquet(path)
-
-
-def train_models(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Instantiate and train individual models."""
-    params = config.get("model_params", {})
-    lgb_params = params.get("lightgbm", {})
-    ridge_params = params.get("ridge", {})
-    mlp_params = params.get("mlp", {})
-
-    models = {
-        "lgb": model_lgb.LightGBMModel(lgb_params),
-        "ridge": model_ridge.RidgeModel(ridge_params),
-        "mlp": model_mlp.MLPModel(mlp_params),
-    }
-
-    for name, mdl in models.items():
-        # Using empty data placeholders for now
-        mdl.train(pd.DataFrame(), pd.Series(dtype=float))
-        utils.log(f"Trained {name} model")
-
-    return models
-
-
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments for training."""
-    parser = argparse.ArgumentParser(description="Train Numerai models")
+    parser = argparse.ArgumentParser(description="Train Numerai models with stacking")
     parser.add_argument("--config", default="config/training.yaml", help="Path to training config")
     parser.add_argument("--params", default="config/model_params.yaml", help="Path to model params")
+    parser.add_argument("--features", default="config/features.yaml", help="Path to feature config")
     return parser.parse_args()
 
 
-def main(config_path: str, params_path: str) -> None:
-    """Main training routine."""
-    config = load_config(config_path)
-    config["model_params"] = load_config(params_path)
+def load_configs(config_path: str, params_path: str, features_path: str) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Load training, model param, and feature configs."""
+    training_cfg = utils.load_yaml(config_path)
+    params_cfg = utils.load_yaml(params_path)
+    features_cfg = utils.load_yaml(features_path)
+    return training_cfg or {}, params_cfg or {}, features_cfg or {}
 
-    train_path = config.get("paths", {}).get("train", "data/train.parquet")
-    data = load_data(train_path)
 
-    _ = train_models(config)
-    utils.log(f"Training complete. Samples seen: {len(data)}")
+def prepare_data(training_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.Series, str]:
+    """Load training data and return features, target, and feature prefix."""
+    feature_prefix = features_cfg.get("features", {}).get("prefix", "feature")
+    train_path = Path(training_cfg.get("files", {}).get("train", "data/numerai_training_data.parquet"))
+    if not train_path.is_absolute():
+        train_path = PROJECT_ROOT / train_path
+    df = utils.safe_read_parquet(train_path)
+
+    if df.empty:
+        utils.log("Training data missing; using dummy dataset.")
+        X, y = utils.dummy_dataset(prefix=feature_prefix)
+        return X, y, feature_prefix
+
+    feature_cols = utils.get_feature_columns(df, feature_prefix)
+    if not feature_cols:
+        utils.log("No feature columns found; using dummy dataset.")
+        X, y = utils.dummy_dataset(prefix=feature_prefix)
+        return X, y, feature_prefix
+
+    target_col = utils.detect_target(df)
+    if target_col not in df.columns:
+        utils.log("Target column missing; using zero target.")
+        y = pd.Series(np.zeros(len(df)), name="target")
+    else:
+        y = df[target_col]
+
+    X = df[feature_cols]
+    return X, y, feature_prefix
+
+
+def model_factories(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Return builders for base models."""
+    return {
+        "lgb": lambda: model_lgb.LightGBMModel(params.get("lightgbm", {})),
+        "ridge": lambda: model_ridge.RidgeModel(params.get("ridge", {})),
+        "mlp": lambda: model_mlp.MLPModel(params.get("mlp", {})),
+    }
+
+
+def train_base_models(X: pd.DataFrame, y: pd.Series, params: Dict[str, Any], n_folds: int, seed: int, models_dir: Path) -> Tuple[Dict[str, Any], pd.DataFrame]:
+    """Train base models with KFold and return fitted models and OOF predictions."""
+    kf = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
+    oof_preds = pd.DataFrame(index=range(len(X)))
+    fitted_models: Dict[str, Any] = {}
+
+    for name, builder in model_factories(params).items():
+        utils.log(f"Training {name} with {n_folds} folds")
+        fold_pred = np.zeros(len(X))
+        for train_idx, val_idx in kf.split(X):
+            mdl = builder()
+            mdl.train(X.iloc[train_idx], y.iloc[train_idx])
+            fold_pred[val_idx] = mdl.predict(X.iloc[val_idx])
+        oof_preds[name] = fold_pred
+
+        final_model = builder()
+        final_model.train(X, y)
+        fitted_models[name] = final_model
+        save_model(models_dir / f"{name}.pkl", final_model)
+
+    return fitted_models, oof_preds
+
+
+def train_stacker(oof_preds: pd.DataFrame, y: pd.Series, params: Dict[str, Any], models_dir: Path) -> stacker.ModelStacker:
+    """Train ridge stacker on OOF predictions."""
+    stack_params = params.get("stacker", {"alpha": 0.5})
+    stk = stacker.ModelStacker(stack_params)
+    stk.fit(oof_preds, y)
+    save_model(models_dir / "stacker.pkl", stk)
+    return stk
+
+
+def save_model(path: Path, model: Any) -> None:
+    """Persist model to disk."""
+    utils.ensure_dir(path.parent)
+    joblib.dump(model, path)
+    utils.log(f"Saved model: {path}")
+
+
+def main() -> None:
+    """Main training routine with stacking."""
+    args = parse_args()
+    training_cfg, params_cfg, features_cfg = load_configs(args.config, args.params, args.features)
+
+    X, y, _ = prepare_data(training_cfg, features_cfg)
+    n_folds = training_cfg.get("general", {}).get("n_folds", 5)
+    seed = training_cfg.get("general", {}).get("seed", 42)
+    models_dir = PROJECT_ROOT / "models"
+
+    _, oof_preds = train_base_models(X, y, params_cfg, n_folds, seed, models_dir)
+    _ = train_stacker(oof_preds, y, params_cfg, models_dir)
+    utils.log("Training complete.")
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    main(args.config, args.params)
+    main()

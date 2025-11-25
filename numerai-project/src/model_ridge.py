@@ -17,12 +17,12 @@ class RidgeModel:
     def train(self, features: pd.DataFrame, target: pd.Series) -> None:
         """Train the Ridge regression model."""
         self.model = Ridge(**self.params)
-        if not features.empty and not target.empty:
-            self.model.fit(features, target)
-        else:
+        if features.empty or target.empty:
             dummy = pd.DataFrame({"f1": [0, 1], "f2": [1, 0]})
             dummy_target = pd.Series([0.0, 0.0])
             self.model.fit(dummy, dummy_target)
+            return
+        self.model.fit(features, target)
 
     def predict(self, features: pd.DataFrame) -> pd.Series:
         """Generate predictions using the trained model."""
