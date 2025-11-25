@@ -8,6 +8,9 @@ lightgbm:
   reg_alpha: 1.0
   reg_lambda: 1.0
   metric: "rmse"
+  device: "gpu"
+  gpu_platform_id: 0
+  gpu_device_id: 0
 
 ridge:
   alpha: 1.0

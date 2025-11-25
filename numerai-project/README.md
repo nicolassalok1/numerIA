@@ -36,6 +36,7 @@ python3 src/train.py \
 ```
 - Utilise LightGBM, Ridge, MLP en 5 folds (configurable) et stacker Ridge(alpha=0.5).
 - Sauvegarde les modeles dans `models/` via joblib.
+- Pour forcer le GPU sur LightGBM, la config contient `device: "gpu"` (necessite une build GPU de LightGBM + CUDA).
 
 ## Prediction
 ```bash
@@ -77,3 +78,30 @@ docker run --rm -v "$(pwd)/../data:/app/data" -v "$(pwd)/../models:/app/models" 
 ## Donnees
 - Le workflow CI telecharge automatiquement les parquet Numerai via numerapi.
 - En local, lancez le snippet CI ou telechargez via `numerapi.NumerAPI().download_dataset(...)` pour peupler `data/`.
+
+## Scripts utilitaires
+- `run_master.sh` : pipeline end-to-end (download, train, predict, option Docker, rappel secrets CI).  
+  ```bash
+  cd numerai-project
+  ./run_master.sh          # pipeline complete
+  DOCKER=1 ./run_master.sh # ajoute build/run docker
+  ```
+- `run_numerai.sh` : pipeline classique (download, train, predict) avec params complets.
+- `run_numerai_light.sh` : pipeline allégée (sample des donnees, 2 folds, hyperparams reduits) pour eviter l’OOM.
+- `automation/submit.py` : genere `models/submission.csv` a partir de `predict.py`.
+- `copilot_open_workspace.sh` : ouvre le workspace VS Code.
+
+## GPU (LightGBM)
+- `config/model_params.yaml` contient `device: "gpu"` et `gpu_platform_id/gpu_device_id`. Cela requiert une build LightGBM GPU (conda/pip compilee avec CUDA/OpenCL) et un driver NVIDIA compatible.
+- Verifier le GPU : `watch -n1 nvidia-smi` pendant `./run_master.sh` ou `./run_numerai.sh`.
+- Si build CPU de LightGBM, la valeur `device: gpu` generera une erreur; reinstalle LightGBM avec support GPU (ex : build conda-forge GPU ou compilation manuelle).
+
+
+
+conda activate numerai-gpu
+cd /home/salok1/PythonProjects/numerAI
+./run_master.sh
+./run_master_light.sh           # GPU_REQUIRED=1 par défaut     
+
+cd /home/salok1/PythonProjects/numerAI/numerai-project
+bash grid_lightgbm.sh   # colle le script ci-dessus dans grid_lightgbm.sh et rends-le exécutable

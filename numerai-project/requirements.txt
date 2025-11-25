@@ -3,5 +3,6 @@ numpy
 scikit-learn
 lightgbm
 pyyaml
+pyarrow
 joblib
 numerapi

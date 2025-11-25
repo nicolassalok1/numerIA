@@ -16,7 +16,20 @@ class MLPModel:
 
     def train(self, features: pd.DataFrame, target: pd.Series) -> None:
         """Train the MLP model."""
-        self.model = MLPRegressor(**self.params)
+        init_params = dict(self.params)
+        # Map config key "layers" to scikit-learn "hidden_layer_sizes"
+        if "layers" in init_params and "hidden_layer_sizes" not in init_params:
+            init_params["hidden_layer_sizes"] = tuple(init_params.pop("layers"))
+
+        # Coerce common numeric params that may arrive as strings from YAML
+        for key, caster in [("alpha", float), ("learning_rate_init", float), ("max_iter", int)]:
+            if key in init_params:
+                try:
+                    init_params[key] = caster(init_params[key])
+                except Exception:
+                    pass
+
+        self.model = MLPRegressor(**init_params)
         if features.empty or target.empty:
             dummy = pd.DataFrame({"f1": [0, 1], "f2": [1, 0]})
             dummy_target = pd.Series([0.0, 0.0])
