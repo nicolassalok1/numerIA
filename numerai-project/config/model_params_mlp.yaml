@@ -1,9 +1,9 @@
-hidden_layer_sizes: [512, 256, 128]
-learning_rate_init: 0.001
-alpha: 0.0005
-batch_size: 4096
-max_iter: 70
+hidden_layer_sizes: [256, 128, 64]   # réduit pour stabilité + vitesse
+learning_rate_init: 0.0005           # plus lent, plus stable
+alpha: 0.001                          # régularisation plus forte
+batch_size: 2048                      # 4096 trop violent → pertes instables
+max_iter: 100                         # laisser le modèle respirer
 early_stopping: True
-n_iter_no_change: 10
-validation_fraction: 0.10
+n_iter_no_change: 15                  # laisse le temps au plateau
+validation_fraction: 0.15             # validation plus fiable
 tol: 1e-4

@@ -1,6 +1,11 @@
 general:
-  row_limit: null
-  n_folds: 3
+  row_limit: 200000
+  n_folds: 5
+  shuffle: true
+  stratify: false
+  fold_type: "kfold"
+  verbose: false
+
 
 files:
   train: "data/numerai_training_data.parquet"

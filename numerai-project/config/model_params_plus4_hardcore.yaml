@@ -2,20 +2,31 @@ model:
   boosting_type: gbdt
   objective: regression
   metric: mae
+
   device_type: gpu
   gpu_platform_id: 0
   gpu_device_id: 0
+
+  # Structure agressive
   max_depth: -1
-  min_sum_hessian_in_leaf: 0.001
+  num_leaves: 384              # +50% vs 256 → bien plus expressif
+  min_data_in_leaf: 50         # agressif mais pas suicide
+  min_sum_hessian_in_leaf: 0.1 # 0.001 = trop faible → instable ; 0.1 = fort & agressif
+  max_bin: 511                 # OK pour modèle agressif
+
+  # Regularisation minimale mais suffisante
   lambda_l1: 0.0
-  lambda_l2: 5.0
+  lambda_l2: 8.0               # tu avais 5 → trop faible pour num_leaves=384
   min_gain_to_split: 0.0
-  verbosity: -1
+
+  # Sous-échantillonnage agressif
+  bagging_fraction: 0.7        # 0.8 → trop léger ; 0.7 = meilleure généralisation
+  feature_fraction: 0.7        # 0.8 → trop de features d’un coup → variance
+
   bagging_freq: 1
-  max_bin: 511
+
+  # Optimisation
   learning_rate: 0.03
-  num_leaves: 256
-  min_data_in_leaf: 100
-  bagging_fraction: 0.8
-  n_estimators: 2000
-  feature_fraction: 0.8
+  n_estimators: 2500           # augmente, car plus de leaves → plus de rounds
+
+  verbosity: -1
