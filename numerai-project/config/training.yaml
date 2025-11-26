@@ -3,8 +3,8 @@ general:
   n_folds: 5
 
 files:
-  train: "data/train.parquet"
-  tournament: "data/tournament.parquet"
-  submission: "data/submission.csv"
+  train: "data/numerai_training_data.parquet"
+  tournament: "data/numerai_tournament_data.parquet"
+  submission: "submission.csv"
 
 seed: 42
