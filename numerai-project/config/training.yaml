@@ -1,6 +1,6 @@
 general:
   row_limit: null
-  n_folds: 5
+  n_folds: 3
 
 files:
   train: "data/numerai_training_data.parquet"
