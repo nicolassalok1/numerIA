@@ -1,11 +1,8 @@
 general:
-  row_limit: 200000
-  n_folds: 5
-  shuffle: true
-  stratify: false
-  fold_type: "kfold"
-  verbose: false
-
+  row_limit: 150000        # 50k = trop faible pour un modèle fiable
+  n_folds: 5               # 2-fold = mauvais CV → variance énorme
+  shuffle: true            # indispensable
+  stratify: false          # pas utile en regression Numerai
 
 files:
   train: "data/numerai_training_data.parquet"
