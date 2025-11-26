@@ -1,12 +1,2 @@
-__pycache__/
-*.pkl
-*.parquet
-.env
-models/
-!models/.gitkeep
-data/
-!data/.gitkeep
-.ipynb_checkpoints/
-.venv/
-README.md
-keys.txt
+# Local submission helper (contains secrets, do not commit)
+submit_with_secrets.ps1

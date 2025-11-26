@@ -144,7 +144,7 @@ foreach ($kv in $tierParams.GetEnumerator()) {
     $yamlLines += "  $($kv.Key): $($kv.Value)"
 }
 $yamlContent = ($yamlLines -join "`n")
-$paramsPath = "config/model_params_autovram.yaml"
+$paramsPath = "config/model_params.yaml"
 Set-Content -Path $paramsPath -Value $yamlContent -Encoding UTF8
 
 Write-Host "Selected auto-VRAM tier: $tier (free VRAM: $freeVramMb MB)"
