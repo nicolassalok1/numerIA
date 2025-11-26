@@ -2,34 +2,20 @@ model:
   boosting_type: gbdt
   objective: regression
   metric: mae
-
-  # GPU stable
   device_type: gpu
   gpu_platform_id: 0
   gpu_device_id: 0
-
-  # Cap sur la stabilité
   max_depth: -1
-  num_leaves: 128        # 256 est trop agressif pour la stabilité
-  min_data_in_leaf: 200  # augmente pour éviter l’overfitting
-  min_sum_hessian_in_leaf: 1.0   # 0.01 = trop faible → splits instables
-
-  # Régularisation propre
+  min_sum_hessian_in_leaf: 0.001
   lambda_l1: 0.0
-  lambda_l2: 10.0
+  lambda_l2: 5.0
   min_gain_to_split: 0.0
-
-  # Bin + mémoire = SAFE MODE
-  max_bin: 255           # 511 explose vite sur GPU → 255 = sweet spot
-
-  # Feature & bagging
+  verbosity: -1
   feature_fraction: 0.8
   bagging_fraction: 0.8
+  num_leaves: 256
   bagging_freq: 1
-
-  # Learning rate + n_estimators
+  min_data_in_leaf: 100
+  max_bin: 511
   learning_rate: 0.03
-  n_estimators: 2500     # augmente car num_leaves plus petit
-
-  # Bruit / logs
-  verbosity: -1
+  n_estimators: 2000
