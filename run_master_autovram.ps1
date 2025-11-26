@@ -1,9 +1,5 @@
 $ErrorActionPreference = "Stop"
 
-$env:NUMERAI_PUBLIC_ID="RCB3JR7KWN2BS2EOYAEHIHXBPAWCDYLS"
-$env:NUMERAI_SECRET_KEY="LJ7IIKM4VF7R7ZBTB2EMM2X2VTKNDGC4HXHZVGLMVW3W5IIGDFDZNIJOWO6BQCY3"
-$env:NUMERAI_MODEL_ID="ecb01105-5985-43bb-b76e-445d94c22928"
-
 # Locate project root
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ((Test-Path (Join-Path $ScriptDir "config")) -and (Test-Path (Join-Path $ScriptDir "src"))) {
@@ -18,28 +14,6 @@ else {
 }
 Set-Location $RootDir
 Write-Host "Project root: $RootDir"
-
-# Resolve data paths from training config when available
-$trainingCfgPath = Join-Path $RootDir "config/training.yaml"
-$trainPath = Join-Path $RootDir "data/numerai_training_data.parquet"
-$tourPath = Join-Path $RootDir "data/numerai_tournament_data.parquet"
-$submissionPath = Join-Path $RootDir "submission.csv"
-
-if (Test-Path $trainingCfgPath) {
-    try {
-        $trainingCfg = Get-Content -Raw -Path $trainingCfgPath | ConvertFrom-Yaml
-        if ($trainingCfg.files.train) { $trainPath = $trainingCfg.files.train }
-        if ($trainingCfg.files.tournament) { $tourPath = $trainingCfg.files.tournament }
-        if ($trainingCfg.files.submission) { $submissionPath = $trainingCfg.files.submission }
-    }
-    catch {
-        Write-Warning "Unable to parse config/training.yaml, falling back to defaults: $($_.Exception.Message)"
-    }
-}
-
-if (-not (Split-Path $trainPath -IsAbsolute)) { $trainPath = Join-Path $RootDir $trainPath }
-if (-not (Split-Path $tourPath -IsAbsolute)) { $tourPath = Join-Path $RootDir $tourPath }
-if (-not (Split-Path $submissionPath -IsAbsolute)) { $submissionPath = Join-Path $RootDir $submissionPath }
 
 # Tooling checks
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
@@ -170,7 +144,7 @@ foreach ($kv in $tierParams.GetEnumerator()) {
     $yamlLines += "  $($kv.Key): $($kv.Value)"
 }
 $yamlContent = ($yamlLines -join "`n")
-$paramsPath = "config/model_params_extreme.yaml"
+$paramsPath = "config/model_params_autovram.yaml"
 Set-Content -Path $paramsPath -Value $yamlContent -Encoding UTF8
 
 Write-Host "Selected auto-VRAM tier: $tier (free VRAM: $freeVramMb MB)"
@@ -179,6 +153,8 @@ Write-Host "Using params file: $paramsPath"
 ###############################################################################
 # 3) Numerai data download (if missing)
 ###############################################################################
+$trainPath = Join-Path $RootDir "data/numerai_training_data.parquet"
+$tourPath = Join-Path $RootDir "data/numerai_tournament_data.parquet"
 if ((Test-Path $trainPath -PathType Leaf) -and (Test-Path $tourPath -PathType Leaf)) {
     Write-Host "Datasets already present, skipping download."
 }
@@ -187,10 +163,10 @@ else {
 from pathlib import Path
 import numerapi
 
-train_dst = Path(r"$($trainPath)")
-tour_dst = Path(r"$($tourPath)")
-train_dst.parent.mkdir(parents=True, exist_ok=True)
-tour_dst.parent.mkdir(parents=True, exist_ok=True)
+data_dir = Path("data")
+train_dst = data_dir / "numerai_training_data.parquet"
+tour_dst = data_dir / "numerai_tournament_data.parquet"
+data_dir.mkdir(parents=True, exist_ok=True)
 
 napi = numerapi.NumerAPI()
 datasets = napi.list_datasets()
@@ -259,32 +235,23 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-
-
-@"
-import os
-from numerapi import NumerAPI
-
-pub = os.environ["NUMERAI_PUBLIC_ID"]
-sec = os.environ["NUMERAI_SECRET_KEY"]
-model_id = os.environ["NUMERAI_MODEL_ID"]
-submission_path = r"$($submissionPath)"
-
-napi = NumerAPI(pub, sec)
-
-try:
-    models = napi.get_models()
-    print("Models:", models)
-except Exception as e:
-    print("get_models error:", e)
-
-resp = napi.upload_predictions(submission_path, model_id=model_id)
-print("Upload status:", resp)
-"@ | python -
 ###############################################################################
+# 5) Optional numerai CLI submission
+###############################################################################
+if ($HAS_NUMERAI -eq 1 -and $env:NUMERAI_PUBLIC_ID -and $env:NUMERAI_SECRET_KEY -and $env:NUMERAI_MODEL_ID) {
+    try {
+        numerai submit --model-id $env:NUMERAI_MODEL_ID --public-id $env:NUMERAI_PUBLIC_ID --secret-key $env:NUMERAI_SECRET_KEY "submission.csv"
+    }
+    catch {
+        Write-Warning "Numerai CLI submission failed: $($_.Exception.Message)"
+    }
+}
+else {
+    Write-Host "Local submission skipped (numerai CLI or secrets missing)."
+}
 
 Write-Host "Summary:"
 Write-Host "  Tier: $tier"
 Write-Host "  Free VRAM used: $freeVramMb MB"
 Write-Host "  Params file: $paramsPath"
-Write-Host "  Submission: $submissionPath (see config/training.yaml)"
+Write-Host "  Submission: submission.csv (see config/training.yaml)"
