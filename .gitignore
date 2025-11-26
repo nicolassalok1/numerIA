@@ -31,6 +31,7 @@ submission.csv
 
 # Local helpers with secrets
 submit_with_secrets.ps1
+numerai-project/scripts/keys_local.ps1
 
 # OS noise
 .DS_Store

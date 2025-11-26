@@ -13,7 +13,7 @@ Ce fichier est un aide-mémoire détaillé pour relancer l’entraînement/préd
 - Données déjà présentes : `data/numerai_training_data.parquet` et `data/numerai_tournament_data.parquet` doivent exister (le pipeline ne les télécharge pas automatiquement).
 
 ### 2. Scripts clés
-- `scripts/run_master_autovram.ps1` : orchestration PowerShell (détection du GPU, affichage VRAM, train + predict + upload API).
+- `scripts/run_me.ps1` : orchestration PowerShell (détection du GPU, affichage VRAM, train + predict + upload API, vérif cred Numerai).
 - `src/train.py` : entraînement (KFold + stacking).
 - `src/predict.py` : prédiction et génération de `submission.csv`.
 - `config/program_input_params.yaml` : hyperparamètres LightGBM utilisés par défaut.
@@ -24,7 +24,7 @@ Ce mode détecte le GPU, affiche la VRAM libre et enchaîne train → predict �
 
 Depuis `numerai-project` :
 ```powershell
-pwsh -File .\scripts\run_master_autovram.ps1
+pwsh -File .\scripts\run_me.ps1
 ```
 Ce que fait le script :
 1) Détecte le GPU et lit la VRAM libre via `nvidia-smi` (affichage uniquement).
@@ -45,6 +45,7 @@ $env:NUMERAI_PUBLIC_ID="VRAI_PUBLIC_ID"
 $env:NUMERAI_SECRET_KEY="VRAIE_SECRET_KEY"
 $env:NUMERAI_MODEL_ID="VRAI_MODEL_ID"
 ```
+Option pratique : crée `scripts/keys_local.ps1` (déjà ignoré par git) avec ces trois lignes, il sera chargé automatiquement par `run_me.ps1`.
 
 ### 4. Pipeline manuel (sans auto-VRAM)
 Depuis `numerai-project`, avec les paramètres statiques existants (LightGBM GPU agressif) :
@@ -82,7 +83,7 @@ Le retour doit contenir un ID de submission. Vérifier ensuite le statut sur le 
 - Paramètres manquants : le projet n’utilise plus `config/model_params.yaml`; passer `--params config/program_input_params.yaml` à `train.py` et `predict.py`.
 
 ### 7. Références utiles
-- `scripts/run_master_autovram.ps1` : pipeline complet (train + predict + upload) utilisant `config/program_input_params.yaml`.
+- `scripts/run_me.ps1` : pipeline complet (train + predict + upload) utilisant `config/program_input_params.yaml` (vérifie les credentials Numerai avant le run).
 - `config/program_input_params.yaml` : hyperparamètres LightGBM (tiers agressif par défaut).
 - `config/features.yaml` / `config/training.yaml` : sélection des features et chemins des fichiers.
 - `submission.csv` : sortie finale à soumettre.

@@ -20,6 +20,13 @@ Set-Location $RootDir
 
 Write-Host "Project root: $RootDir"
 
+# Optional local credentials file (not tracked by git)
+$localKeysPath = Join-Path $ScriptDir "keys_local.ps1"
+if (Test-Path $localKeysPath) {
+    Write-Host "Loading Numerai credentials from $localKeysPath"
+    . $localKeysPath
+}
+
 # Resolve data paths
 $trainingCfgRel    = "config/training.yaml"
 $featuresCfgRel    = "config/features.yaml"
@@ -47,6 +54,34 @@ if (-not (Split-Path $submissionPath -IsAbsolute)) { $submissionPath = Join-Path
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     Write-Error "python not found in PATH."
     exit 1
+}
+
+# Check credentials presence before doing any heavy work
+$requiredEnv = @("NUMERAI_PUBLIC_ID", "NUMERAI_SECRET_KEY", "NUMERAI_MODEL_ID")
+$missing = $requiredEnv | Where-Object { -not $env:$_ }
+if ($missing) {
+    Write-Error "Missing Numerai env vars: $($missing -join ', '). Export them before running."
+    exit 1
+}
+
+# Quick auth sanity check to fail fast on expired/invalid keys
+$authScript = @'
+import os, sys
+from numerapi import NumerAPI
+
+try:
+    napi = NumerAPI(os.environ["NUMERAI_PUBLIC_ID"], os.environ["NUMERAI_SECRET_KEY"])
+    me = napi.get_account()
+    models = [m.get("id") for m in napi.get_models()] or []
+    print("Auth OK for:", me.get("username"), "Models:", ", ".join(models))
+except Exception as exc:
+    print("AUTH_ERROR:", exc)
+    sys.exit(3)
+'@
+$authScript | python -
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Numerai credentials invalid/expirées. Regénère une Secret Key et vérifie le Model ID."
+    exit $LASTEXITCODE
 }
 
 function Show-YamlConfig {
