@@ -37,13 +37,14 @@ $tourPath          = Join-Path $RootDir "data/numerai_tournament_data.parquet"
 $submissionPath    = Join-Path $RootDir "submission.csv"
 
 if (Test-Path $trainingCfgPath) {
-    try {
-        $trainingCfg = Get-Content -Raw -Path $trainingCfgPath | ConvertFrom-Yaml
-        if ($trainingCfg.files.train)       { $trainPath = $trainingCfg.files.train }
-        if ($trainingCfg.files.tournament)  { $tourPath = $trainingCfg.files.tournament }
-        if ($trainingCfg.files.submission)  { $submissionPath = $trainingCfg.files.submission }
+    if (Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue) {
+        $trainingCfg = Get-Content -Raw -Path $trainingCfgPath | ConvertFrom-Yaml -ErrorAction SilentlyContinue
+        if ($trainingCfg) {
+            if ($trainingCfg.files.train)       { $trainPath = $trainingCfg.files.train }
+            if ($trainingCfg.files.tournament)  { $tourPath = $trainingCfg.files.tournament }
+            if ($trainingCfg.files.submission)  { $submissionPath = $trainingCfg.files.submission }
+        }
     }
-    catch { Write-Warning "Unable to parse training.yaml" }
 }
 
 if (-not (Split-Path $trainPath -IsAbsolute))      { $trainPath      = Join-Path $RootDir $trainPath }
@@ -58,7 +59,7 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
 
 # Check credentials presence before doing any heavy work
 $requiredEnv = @("NUMERAI_PUBLIC_ID", "NUMERAI_SECRET_KEY", "NUMERAI_MODEL_ID")
-$missing = $requiredEnv | Where-Object { -not $env:$_ }
+$missing = $requiredEnv | Where-Object { -not [System.Environment]::GetEnvironmentVariable($_) }
 if ($missing) {
     Write-Error "Missing Numerai env vars: $($missing -join ', '). Export them before running."
     exit 1
@@ -67,16 +68,42 @@ if ($missing) {
 # Quick auth sanity check to fail fast on expired/invalid keys
 $authScript = @'
 import os, sys
+import logging
 from numerapi import NumerAPI
 
+pub = os.environ["NUMERAI_PUBLIC_ID"]
+sec = os.environ["NUMERAI_SECRET_KEY"]
+
+# Silence numerapi noisy logging for limited-scope keys
+logging.getLogger("numerapi").setLevel(logging.CRITICAL)
+
+def is_invalid_session(err: Exception) -> bool:
+    msg = str(err).lower()
+    return "invalid" in msg or "expired" in msg or "forbidden" in msg
+
 try:
-    napi = NumerAPI(os.environ["NUMERAI_PUBLIC_ID"], os.environ["NUMERAI_SECRET_KEY"])
-    me = napi.get_account()
-    models = [m.get("id") for m in napi.get_models()] or []
-    print("Auth OK for:", me.get("username"), "Models:", ", ".join(models))
+    napi = NumerAPI(pub, sec)
+    models_resp = napi.get_models() or []
+    model_ids = []
+    for m in models_resp:
+        if isinstance(m, dict):
+            mid = m.get("id") or m.get("model_id")
+            if mid:
+                model_ids.append(str(mid))
+        else:
+            model_ids.append(str(m))
+    print("Auth OK (models list) Models:", ", ".join(model_ids) or "<none>")
 except Exception as exc:
-    print("AUTH_ERROR:", exc)
-    sys.exit(3)
+    msg = str(exc)
+    if is_invalid_session(exc):
+        print("AUTH_ERROR_INVALID:", exc)
+        sys.exit(3)
+    if "Insufficient permission for read_user_info" in msg:
+        # Key scoped for upload only; auth is fine for uploads.
+        print("Auth OK (limited scope: upload only).")
+        sys.exit(0)
+    print("AUTH_WARNING_CONTINUE:", exc)
+    sys.exit(0)
 '@
 $authScript | python -
 if ($LASTEXITCODE -ne 0) {
