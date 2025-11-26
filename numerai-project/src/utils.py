@@ -119,18 +119,25 @@ def normalize_params(params_cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def align_lightgbm_aliases(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Ensure LightGBM alias parameters share the same value to silence warnings."""
+    """Keep one canonical key per LightGBM alias group to avoid duplicate warnings."""
     aligned = dict(params or {})
     for primary, alias in LIGHTGBM_ALIAS_GROUPS:
         primary_val = aligned.get(primary)
         alias_val = aligned.get(alias)
-        if primary_val is not None and alias_val is None:
-            aligned[alias] = primary_val
-        elif alias_val is not None and primary_val is None:
+
+        if primary_val is None and alias_val is None:
+            continue
+        if primary_val is None and alias_val is not None:
+            # Promote alias to primary, drop alias
             aligned[primary] = alias_val
-        elif primary_val is not None and alias_val is not None and primary_val != alias_val:
-            # Keep primary as source of truth and mirror to alias to avoid "ignored" warnings
-            aligned[alias] = primary_val
+            aligned.pop(alias, None)
+            continue
+        if primary_val is not None and alias_val is None:
+            # Only primary present: keep as-is
+            continue
+
+        # Both set: keep primary as source of truth, drop alias to silence warnings
+        aligned.pop(alias, None)
     return aligned
 
 

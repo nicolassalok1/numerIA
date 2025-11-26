@@ -1,9 +1,5 @@
 $ErrorActionPreference = "Stop"
 
-$env:NUMERAI_PUBLIC_ID="RCB3JR7KWN2BS2EOYAEHIHXBPAWCDYLS"
-$env:NUMERAI_SECRET_KEY="LJ7IIKM4VF7R7RBTB2EMM2X2VTKNDGC4HXHZVGLMVW3W5IIGDFDZNIJOWO6BQCY3"
-$env:NUMERAI_MODEL_ID="ecb01105-5985-43bb-b76e-445d94c22928"
-
 # Locate project root
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ParentDir = Split-Path -Parent $ScriptDir
