@@ -1,7 +1,0 @@
-[
-  {
-    "key": "ctrl+shift+t",
-    "command": "workbench.action.tasks.runTask",
-    "args": "Train Numerai Model"
-  }
-]

@@ -1,9 +1,0 @@
-hidden_layer_sizes: [512, 256, 128]
-learning_rate_init: 0.0007
-alpha: 0.0005
-batch_size: 4096
-max_iter: 70
-early_stopping: True
-n_iter_no_change: 10
-validation_fraction: 0.10
-tol: 1e-4
