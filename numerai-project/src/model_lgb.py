@@ -6,6 +6,8 @@ from typing import Dict, Any
 import lightgbm as lgb
 import pandas as pd
 
+from src import utils
+
 
 class LightGBMModel:
     """Wrapper around lightgbm Booster for Numerai."""
@@ -16,7 +18,10 @@ class LightGBMModel:
 
     def train(self, features: pd.DataFrame, target: pd.Series) -> None:
         """Train the LightGBM model."""
-        self.model = lgb.LGBMRegressor(**self.params)
+        aligned_params = utils.align_lightgbm_aliases(self.params)
+        # Store aligned params to ensure predict/reload consistency
+        self.params = aligned_params
+        self.model = lgb.LGBMRegressor(**aligned_params)
         if features.empty or target.empty:
             dummy = pd.DataFrame({"f1": [0, 1], "f2": [1, 0]})
             dummy_target = pd.Series([0.0, 0.0])

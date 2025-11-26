@@ -17,6 +17,17 @@ TARGET_CANDIDATES = [
     "target_jericho",
 ]
 
+# Keep alias pairs in sync to avoid LightGBM noise when both names are present
+LIGHTGBM_ALIAS_GROUPS = [
+    ("feature_fraction", "colsample_bytree"),
+    ("bagging_fraction", "subsample"),
+    ("bagging_freq", "subsample_freq"),
+    ("min_data_in_leaf", "min_child_samples"),
+    ("min_sum_hessian_in_leaf", "min_child_weight"),
+    ("lambda_l1", "reg_alpha"),
+    ("lambda_l2", "reg_lambda"),
+]
+
 
 def log(message: str) -> None:
     """Minimal console logger with timestamp."""
@@ -105,6 +116,22 @@ def normalize_params(params_cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     normalized["mlp"] = mlp_params or {}
     normalized["stacker"] = stacker_params or {}
     return normalized
+
+
+def align_lightgbm_aliases(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Ensure LightGBM alias parameters share the same value to silence warnings."""
+    aligned = dict(params or {})
+    for primary, alias in LIGHTGBM_ALIAS_GROUPS:
+        primary_val = aligned.get(primary)
+        alias_val = aligned.get(alias)
+        if primary_val is not None and alias_val is None:
+            aligned[alias] = primary_val
+        elif alias_val is not None and primary_val is None:
+            aligned[primary] = alias_val
+        elif primary_val is not None and alias_val is not None and primary_val != alias_val:
+            # Keep primary as source of truth and mirror to alias to avoid "ignored" warnings
+            aligned[alias] = primary_val
+    return aligned
 
 
 def parquet_columns(path: str | Path) -> List[str]:
