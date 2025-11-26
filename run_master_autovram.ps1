@@ -144,7 +144,7 @@ foreach ($kv in $tierParams.GetEnumerator()) {
     $yamlLines += "  $($kv.Key): $($kv.Value)"
 }
 $yamlContent = ($yamlLines -join "`n")
-$paramsPath = "config/model_params.yaml"
+$paramsPath = "config/model_params_extreme.yaml"
 Set-Content -Path $paramsPath -Value $yamlContent -Encoding UTF8
 
 Write-Host "Selected auto-VRAM tier: $tier (free VRAM: $freeVramMb MB)"
@@ -235,20 +235,28 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+
+
+@'
+import os
+from numerapi import NumerAPI
+
+pub = os.environ["NUMERAI_PUBLIC_ID"]
+sec = os.environ["NUMERAI_SECRET_KEY"]
+model_id = os.environ["NUMERAI_MODEL_ID"]
+
+napi = NumerAPI(pub, sec)
+
+try:
+    models = napi.get_models()
+    print("Models:", models)
+except Exception as e:
+    print("get_models error:", e)
+
+resp = napi.upload_predictions("submission.csv", model_id=model_id)
+print("Upload status:", resp)
+'@ | python -
 ###############################################################################
-# 5) Optional numerai CLI submission
-###############################################################################
-if ($HAS_NUMERAI -eq 1 -and $env:NUMERAI_PUBLIC_ID -and $env:NUMERAI_SECRET_KEY -and $env:NUMERAI_MODEL_ID) {
-    try {
-        numerai submit --model-id $env:NUMERAI_MODEL_ID --public-id $env:NUMERAI_PUBLIC_ID --secret-key $env:NUMERAI_SECRET_KEY "submission.csv"
-    }
-    catch {
-        Write-Warning "Numerai CLI submission failed: $($_.Exception.Message)"
-    }
-}
-else {
-    Write-Host "Local submission skipped (numerai CLI or secrets missing)."
-}
 
 Write-Host "Summary:"
 Write-Host "  Tier: $tier"

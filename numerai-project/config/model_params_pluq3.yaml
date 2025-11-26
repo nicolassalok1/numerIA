@@ -27,3 +27,22 @@ model:
   min_gain_to_split: 0.0
 
   verbosity: -1
+
+ridge:
+  alpha: 1.0
+
+mlp:
+  layers: [1024, 512, 256, 128]
+  alpha: 1e-4
+  learning_rate_init: 3e-4
+  batch_size: 256
+  beta_1: 0.9
+  beta_2: 0.999
+  max_iter: 500
+  early_stopping: true
+  n_iter_no_change: 15
+  validation_fraction: 0.1
+  tol: 1e-4
+
+stacker:
+  alpha: 0.5

@@ -1,2 +1,3 @@
 # Local submission helper (contains secrets, do not commit)
 submit_with_secrets.ps1
+run_master_autovram.ps1
