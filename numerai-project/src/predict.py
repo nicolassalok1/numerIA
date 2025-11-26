@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Tuple
 
 import joblib
+import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -69,20 +70,34 @@ def load_features(training_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) ->
     tournament_path = Path(training_cfg.get("files", {}).get("tournament", "data/numerai_tournament_data.parquet"))
     if not tournament_path.is_absolute():
         tournament_path = PROJECT_ROOT / tournament_path
-    feature_prefix = features_cfg.get("features", {}).get("prefix", "feature")
-    df = utils.safe_read_parquet(tournament_path)
-    feature_cols = utils.get_feature_columns(df, feature_prefix)
+    feature_cfg = features_cfg.get("features", {})
+    feature_prefix = feature_cfg.get("prefix", "feature")
+    feature_limit = feature_cfg.get("max_features") or feature_cfg.get("limit")
+    schema_cols = utils.parquet_columns(tournament_path)
+    feature_cols = [c for c in schema_cols if c.startswith(feature_prefix)] if schema_cols else []
+    if feature_limit:
+        feature_cols = feature_cols[:feature_limit]
+    id_candidates = ["id", "prediction_id", "row_id", "tournament_id"]
+    id_col = next((c for c in id_candidates if c in schema_cols), None) if schema_cols else None
+    columns_to_read = feature_cols + ([id_col] if id_col else [])
+    df = utils.safe_read_parquet(tournament_path, columns=columns_to_read or None)
+    if id_col and id_col not in df.columns and df.index.name == id_col:
+        df = df.reset_index()
+    if not feature_cols:
+        feature_cols = utils.get_feature_columns(df, feature_prefix)
+        if feature_limit:
+            feature_cols = feature_cols[:feature_limit]
 
     if df.empty or not feature_cols:
         utils.log("Tournament data missing or feature columns not found; using dummy data.")
         df, _ = utils.dummy_dataset(prefix=feature_prefix)
         feature_cols = utils.get_feature_columns(df, feature_prefix)
 
-    id_col = None
-    for candidate in ["id", "prediction_id", "row_id", "tournament_id"]:
-        if candidate in df.columns:
-            id_col = candidate
-            break
+    if id_col is None:
+        for candidate in id_candidates:
+            if candidate in df.columns:
+                id_col = candidate
+                break
     if id_col is None:
         # fallback: utilise la première colonne non-feature ou un index
         non_feature_cols = [c for c in df.columns if c not in feature_cols]
@@ -90,7 +105,9 @@ def load_features(training_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) ->
     else:
         ids = df[id_col].reset_index(drop=True)
 
-    return df[feature_cols], ids, Path(tournament_path)
+    features_df = df[feature_cols].astype(np.float32, copy=False)
+    del df
+    return features_df, ids, Path(tournament_path)
 
 
 def predict(models_dir: Path, training_cfg: Dict[str, Any], params_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) -> pd.DataFrame:

@@ -37,31 +37,49 @@ def load_configs(config_path: str, params_path: str, features_path: str) -> Tupl
 
 def prepare_data(training_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.Series, str]:
     """Load training data and return features, target, and feature prefix."""
-    feature_prefix = features_cfg.get("features", {}).get("prefix", "feature")
+    feature_cfg = features_cfg.get("features", {})
+    feature_prefix = feature_cfg.get("prefix", "feature")
+    feature_limit = feature_cfg.get("max_features") or feature_cfg.get("limit")
+    row_limit = training_cfg.get("general", {}).get("row_limit")
+    seed = training_cfg.get("general", {}).get("seed", 42)
     train_path = Path(training_cfg.get("files", {}).get("train", "data/numerai_training_data.parquet"))
     if not train_path.is_absolute():
         train_path = PROJECT_ROOT / train_path
-    df = utils.safe_read_parquet(train_path)
+    schema_cols = utils.parquet_columns(train_path)
+    feature_cols = [c for c in schema_cols if c.startswith(feature_prefix)] if schema_cols else []
+    if feature_limit:
+        feature_cols = feature_cols[:feature_limit]
+    target_col = utils.find_target_column(schema_cols) if schema_cols else None
+    columns_to_read = feature_cols + ([target_col] if target_col else [])
+    df = utils.safe_read_parquet(train_path, columns=columns_to_read or None)
 
     if df.empty:
         utils.log("Training data missing; using dummy dataset.")
         X, y = utils.dummy_dataset(prefix=feature_prefix)
         return X, y, feature_prefix
 
-    feature_cols = utils.get_feature_columns(df, feature_prefix)
+    if not feature_cols:
+        feature_cols = utils.get_feature_columns(df, feature_prefix)
+        if feature_limit:
+            feature_cols = feature_cols[:feature_limit]
     if not feature_cols:
         utils.log("No feature columns found; using dummy dataset.")
         X, y = utils.dummy_dataset(prefix=feature_prefix)
         return X, y, feature_prefix
+    if row_limit and len(df) > row_limit:
+        df = df.sample(n=row_limit, random_state=seed).reset_index(drop=True)
+        utils.log(f"Row limit applied: {row_limit} rows sampled for training.")
 
-    target_col = utils.detect_target(df)
+    if not target_col:
+        target_col = utils.detect_target(df)
     if target_col not in df.columns:
         utils.log("Target column missing; using zero target.")
-        y = pd.Series(np.zeros(len(df)), name="target")
+        y = pd.Series(np.zeros(len(df), dtype=np.float32), name="target")
     else:
-        y = df[target_col]
+        y = df[target_col].astype(np.float32, copy=False)
 
-    X = df[feature_cols]
+    X = df[feature_cols].astype(np.float32, copy=False)
+    del df
     return X, y, feature_prefix
 
 

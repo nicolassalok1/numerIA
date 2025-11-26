@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -38,13 +38,31 @@ def load_yaml(path: str | Path) -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def safe_read_parquet(path: str | Path) -> pd.DataFrame:
-    """Read parquet file safely, returning an empty frame if missing."""
+def parquet_columns(path: str | Path) -> List[str]:
+    """Return parquet column names without loading the dataset."""
+    path = Path(path)
+    if not path.exists():
+        return []
+    try:
+        import pyarrow.parquet as pq
+
+        return list(pq.read_schema(path).names)
+    except Exception as exc:  # pragma: no cover - schema probe is best-effort
+        log(f"Unable to inspect schema for {path}: {exc}")
+        return []
+
+
+def safe_read_parquet(path: str | Path, columns: List[str] | None = None) -> pd.DataFrame:
+    """Read parquet file safely, returning an empty frame if missing or failing."""
     path = Path(path)
     if not path.exists():
         log(f"File not found: {path}. Returning empty DataFrame.")
         return pd.DataFrame()
-    return pd.read_parquet(path)
+    try:
+        return pd.read_parquet(path, columns=columns)
+    except Exception as exc:  # pragma: no cover - IO failures are best-effort
+        log(f"Failed to read parquet {path}: {exc}")
+        return pd.DataFrame()
 
 
 def get_feature_columns(df: pd.DataFrame, prefix: str = "feature") -> List[str]:
@@ -52,12 +70,17 @@ def get_feature_columns(df: pd.DataFrame, prefix: str = "feature") -> List[str]:
     return [c for c in df.columns if c.startswith(prefix)]
 
 
+def find_target_column(columns: Iterable[str]) -> str | None:
+    """Find the first known target column name in a list."""
+    for candidate in TARGET_CANDIDATES:
+        if candidate in columns:
+            return candidate
+    return None
+
+
 def detect_target(df: pd.DataFrame) -> str:
     """Detect a target column name from common Numerai targets."""
-    for candidate in TARGET_CANDIDATES:
-        if candidate in df.columns:
-            return candidate
-    return "target"
+    return find_target_column(df.columns) or "target"
 
 
 def dummy_dataset(n_rows: int = 100, n_features: int = 3, prefix: str = "feature") -> Tuple[pd.DataFrame, pd.Series]:
