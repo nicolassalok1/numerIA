@@ -1,0 +1,15 @@
+name: numerai-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pandas
+  - numpy
+  - scikit-learn
+  - lightgbm
+  - pyyaml
+  - pyarrow
+  - pip
+  - pip:
+      - joblib
+      - numerapi

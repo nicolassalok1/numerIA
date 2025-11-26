@@ -1,0 +1,8 @@
+.venv/
+keys.txt
+lightgbm_gpu_build/*
+*.ps1
+
+# Large local datasets and outputs
+numerai-project/data/
+numerai-project/submission.csv
