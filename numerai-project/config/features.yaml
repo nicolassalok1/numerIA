@@ -1,3 +1,3 @@
 features:
-  prefix: "feature"
-  max_features: 400
+  prefix: "f_"
+  max_features: null

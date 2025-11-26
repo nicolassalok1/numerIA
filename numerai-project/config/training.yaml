@@ -1,9 +1,10 @@
 general:
-  seed: 42
+  row_limit: null
   n_folds: 5
-  row_limit: 50000
 
 files:
-  train: "data/numerai_training_data.parquet"
-  tournament: "data/numerai_tournament_data.parquet"
-  submission: "submission.csv"
+  train: "data/train.parquet"
+  tournament: "data/tournament.parquet"
+  submission: "data/submission.csv"
+
+seed: 42
