@@ -51,6 +51,34 @@ if (-not (Split-Path $trainPath -IsAbsolute))      { $trainPath      = Join-Path
 if (-not (Split-Path $tourPath -IsAbsolute))       { $tourPath       = Join-Path $RootDir $tourPath }
 if (-not (Split-Path $submissionPath -IsAbsolute)) { $submissionPath = Join-Path $RootDir $submissionPath }
 
+# Refresh Numerai datasets unless explicitly skipped
+if (-not $env:SKIP_DATA_REFRESH) {
+    Write-Host "Refreshing Numerai datasets (train & live)..."
+    $downloadScript = @"
+import os
+from pathlib import Path
+from numerapi import NumerAPI
+
+train_path = Path(r"$trainPath")
+live_path = Path(r"$tourPath")
+train_path.parent.mkdir(parents=True, exist_ok=True)
+live_path.parent.mkdir(parents=True, exist_ok=True)
+
+napi = NumerAPI()
+
+def download(src: str, dest: Path) -> None:
+    try:
+        napi.download_dataset(src, str(dest))
+        print(f"Downloaded {src} -> {dest}")
+    except Exception as exc:
+        print(f"DOWNLOAD_WARNING {src}: {exc}")
+
+download("v5.0/train.parquet", train_path)
+download("v5.0/live.parquet", live_path)
+"@
+    $downloadScript | python -
+}
+
 # Check tooling
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     Write-Error "python not found in PATH."

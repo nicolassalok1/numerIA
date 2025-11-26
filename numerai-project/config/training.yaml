@@ -1,8 +1,8 @@
 general:
-  row_limit: 150000        # 50k = trop faible pour un modèle fiable
-  n_folds: 5               # 2-fold = mauvais CV → variance énorme
-  shuffle: true            # indispensable
-  stratify: false          # pas utile en regression Numerai
+  row_limit: 150000        # en dessous, je trouve le modèle trop fragile
+  n_folds: 5               # 5-fold = compromis perf/temps qui me va bien
+  shuffle: true            # je shuffle toujours les folds
+  stratify: false          # pas utile ici, on est en regression Numerai
 
 files:
   train: "data/numerai_training_data.parquet"

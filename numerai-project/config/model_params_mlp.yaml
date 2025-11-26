@@ -1,9 +1,9 @@
-hidden_layer_sizes: [256, 128, 64]   # réduit pour stabilité + vitesse
-learning_rate_init: 0.0005           # plus lent, plus stable
-alpha: 0.001                          # régularisation plus forte
-batch_size: 2048                      # 4096 trop violent → pertes instables
-max_iter: 100                         # laisser le modèle respirer
+hidden_layer_sizes: [256, 128, 64]   # taille qui tourne bien chez moi (stable + rapide)
+learning_rate_init: 0.0005           # je reste prudent sur le LR
+alpha: 0.001                          # un poil de régul L2
+batch_size: 2048                      # 4096 me donnait des pertes instables
+max_iter: 100                         # je laisse le modèle itérer un peu
 early_stopping: True
-n_iter_no_change: 15                  # laisse le temps au plateau
-validation_fraction: 0.15             # validation plus fiable
+n_iter_no_change: 15                  # je laisse 15 iters pour plateaux
+validation_fraction: 0.15             # split val un peu plus large
 tol: 1e-4

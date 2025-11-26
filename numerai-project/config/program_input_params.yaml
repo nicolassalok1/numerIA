@@ -1,23 +1,23 @@
 model:
-  metric: mae                  # métrique suivie (pas redondante ailleurs)
+  metric: mae                  # je reste sur MAE pour suivre le run
 
-  device_type: gpu             # forcer GPU (sinon CPU par défaut)
-  gpu_device_id: 0             # GPU principal
+  device_type: gpu             # je force le GPU
+  gpu_device_id: 0             # 4060 = device 0
 
-  # Structure agressive
-  num_leaves: 384              # +50% vs 256 → bien plus expressif
-  min_data_in_leaf: 50         # agressif mais pas suicide
-  min_sum_hessian_in_leaf: 0.1 # 0.001 = trop faible → instable ; 0.1 = fort & agressif
-  max_bin: 511                 # OK pour modèle agressif
+  # Arbre bien large (profil "agressif" que j'utilise)
+  num_leaves: 384              # plus large que 256, ça capture plus de signal
+  min_data_in_leaf: 50         # je garde un minimum pour éviter de trop overfit
+  min_sum_hessian_in_leaf: 0.1 # 0.001 m'a paru trop instable
+  max_bin: 511                 # tolérable côté VRAM avec ce setup
 
-  # Régularisation L2 (L1/other laissés aux defaults)
-  lambda_l2: 8.0               # tu avais 5 → trop faible pour num_leaves=384
+  # Régul L2
+  lambda_l2: 8.0               # j'ai monté la L2 pour calmer les leaves
 
-  # Sous-échantillonnage agressif
-  bagging_fraction: 0.7        # 0.8 → trop léger ; 0.7 = meilleure généralisation
-  feature_fraction: 0.7        # 0.8 → trop de features d’un coup → variance
+  # Sous-échantillonnage
+  bagging_fraction: 0.7        # 0.8 surchauffait, 0.7 généralise mieux
+  feature_fraction: 0.7        # je limite le nombre de features vues par arbre
   bagging_freq: 1
 
   # Optimisation
   learning_rate: 0.03
-  n_estimators: 2500           # augmente, car plus de leaves → plus de rounds
+  n_estimators: 2500           # plus de rounds pour compenser le LR

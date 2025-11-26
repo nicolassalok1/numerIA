@@ -1,6 +1,6 @@
 features:
   prefix: "feature"
-  max_features: 200        # 400 = trop large
-  min_corr_abs: 0.02       # supprime les features inutiles
-  max_na_ratio: 0.10       # supprime les features trop manquantes
-  standardize: true        # obligatoire pour MLP / LGBM régulier
+  max_features: 200        # au-delà de 200 ça dilue, VRAM et perf se dégradent
+  min_corr_abs: 0.02       # je vire ce qui ne bouge pas
+  max_na_ratio: 0.10       # trop de NA -> dehors
+  standardize: true        # je standardise pour que MLP/LGBM restent stables

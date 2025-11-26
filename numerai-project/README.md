@@ -46,6 +46,7 @@ $env:NUMERAI_SECRET_KEY="VRAIE_SECRET_KEY"
 $env:NUMERAI_MODEL_ID="VRAI_MODEL_ID"
 ```
 Option pratique : crée `scripts/keys_local.ps1` (déjà ignoré par git) avec ces trois lignes, il sera chargé automatiquement par `run_me.ps1`.
+Le script rafraîchit aussi les datasets Numerai (`train.parquet` et `live.parquet`) avant d’entraîner/prédire, sauf si `SKIP_DATA_REFRESH=1` est défini.
 
 ### 4. Pipeline manuel (sans auto-VRAM)
 Depuis `numerai-project`, avec les paramètres statiques existants (LightGBM GPU agressif) :
@@ -76,6 +77,7 @@ Le retour doit contenir un ID de submission. Vérifier ensuite le statut sur le 
 
 ### 6. Dépannage rapide
 - `session is invalid or expired` : Secret Key ou Public ID incorrects/expirés, ou Model ID non associé au compte. Regénérer la Secret Key et vérifier le Model ID.
+- `invalid_submission_ids` : le live set est obsolète. Laisse `run_me.ps1` rafraîchir les datasets (ou supprime `SKIP_DATA_REFRESH`) pour récupérer le dernier `live.parquet`.
 - Données absentes : le pipeline ne télécharge pas. Récupérer les fichiers Numerai officiels et placer `numerai_training_data.parquet` et `numerai_tournament_data.parquet` dans `data/`.
 - `nvidia-smi` absent : installer/mettre à jour les drivers NVIDIA ou définir `GPU_REQUIRED=0` (mais perte GPU).
 - `git add` échoue sur `.venv/` : ajouter `.venv/` à `.gitignore`.
