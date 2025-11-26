@@ -1,0 +1,23 @@
+$env:NUMERAI_PUBLIC_ID="RCB3JR7KWN2BS2EOYAEHIHXBPAWCDYLS"
+$env:NUMERAI_SECRET_KEY="LJ7IIKM4VF7R7ZBTB2EMM2X2VTKNDGC4HXHZVGLMVW3W5IIGDFDZNIJOWO6BQCY3"
+$env:NUMERAI_MODEL_ID="ecb01105-5985-43bb-b76e-445d94c22928"
+
+@'
+import os
+from numerapi import NumerAPI
+
+pub = os.environ["NUMERAI_PUBLIC_ID"]
+sec = os.environ["NUMERAI_SECRET_KEY"]
+model_id = os.environ["NUMERAI_MODEL_ID"]
+
+napi = NumerAPI(pub, sec)
+
+try:
+    models = napi.get_models()
+    print("Models:", models)
+except Exception as e:
+    print("get_models error:", e)
+
+resp = napi.upload_predictions("submission.csv", model_id=model_id)
+print("Upload status:", resp)
+'@ | python -
