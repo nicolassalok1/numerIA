@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -36,6 +36,75 @@ def load_yaml(path: str | Path) -> Dict[str, Any]:
     path = Path(path)
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def normalize_params(params_cfg: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Normalize various YAML layouts into a unified params dict.
+
+    Supports current repo files where LightGBM params live under `model`
+    (or at top-level) and MLP params can be top-level as well.
+    """
+    params_cfg = params_cfg or {}
+    normalized: Dict[str, Any] = {"lightgbm": {}, "ridge": {}, "mlp": {}, "stacker": {}}
+
+    lightgbm_keys = {
+        "boosting_type",
+        "objective",
+        "metric",
+        "device_type",
+        "gpu_platform_id",
+        "gpu_device_id",
+        "max_depth",
+        "num_leaves",
+        "min_data_in_leaf",
+        "min_sum_hessian_in_leaf",
+        "max_bin",
+        "feature_fraction",
+        "bagging_fraction",
+        "bagging_freq",
+        "learning_rate",
+        "n_estimators",
+        "verbosity",
+        "lambda_l1",
+        "lambda_l2",
+        "min_gain_to_split",
+    }
+    mlp_keys = {
+        "hidden_layer_sizes",
+        "layers",
+        "learning_rate_init",
+        "alpha",
+        "batch_size",
+        "max_iter",
+        "early_stopping",
+        "n_iter_no_change",
+        "validation_fraction",
+        "tol",
+    }
+
+    lightgbm_params = params_cfg.get("lightgbm") or params_cfg.get("model")
+    ridge_params = params_cfg.get("ridge") or {}
+    stacker_params = params_cfg.get("stacker") or {}
+    mlp_params = params_cfg.get("mlp")
+
+    mlp_candidates = {k: v for k, v in params_cfg.items() if k in mlp_keys}
+    has_mlp_like = bool(mlp_params) or bool(mlp_candidates)
+
+    if not lightgbm_params:
+        lgb_candidates = {k: v for k, v in params_cfg.items() if k in lightgbm_keys}
+        if lgb_candidates:
+            lightgbm_params = lgb_candidates
+        elif params_cfg and not has_mlp_like and not any(k in params_cfg for k in ("ridge", "stacker", "lightgbm", "model")):
+            lightgbm_params = dict(params_cfg)
+
+    if not mlp_params and mlp_candidates:
+        mlp_params = mlp_candidates
+
+    normalized["lightgbm"] = lightgbm_params or {}
+    normalized["ridge"] = ridge_params or {}
+    normalized["mlp"] = mlp_params or {}
+    normalized["stacker"] = stacker_params or {}
+    return normalized
 
 
 def parquet_columns(path: str | Path) -> List[str]:

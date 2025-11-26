@@ -13,7 +13,7 @@ from src import predict, utils  # noqa: E402
 def build_submission() -> Path:
     """Create a submission file from model predictions."""
     training_cfg = utils.load_yaml(PROJECT_ROOT / "config" / "training.yaml") or {}
-    params_cfg = utils.load_yaml(PROJECT_ROOT / "config" / "model_params.yaml") or {}
+    params_cfg = utils.normalize_params(utils.load_yaml(PROJECT_ROOT / "config" / "model_params.yaml"))
     features_cfg = utils.load_yaml(PROJECT_ROOT / "config" / "features.yaml") or {}
 
     models_dir = PROJECT_ROOT / "models"

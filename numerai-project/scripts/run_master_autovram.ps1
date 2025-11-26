@@ -1,7 +1,3 @@
-param(
-    [string]$ParamsFile = ""
-)
-
 $ErrorActionPreference = "Stop"
 
 $env:NUMERAI_PUBLIC_ID="RCB3JR7KWN2BS2EOYAEHIHXBPAWCDYLS"
@@ -57,6 +53,21 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
+function Show-YamlConfig {
+    param(
+        [string]$Label,
+        [string]$Path
+    )
+    Write-Host ""
+    Write-Host "# --- $Label ---"
+    Write-Host "# Path: $Path"
+    if (-not (Test-Path $Path)) {
+        Write-Host "# [ABSENT] fichier introuvable"
+        return
+    }
+    Get-Content -Path $Path | ForEach-Object { "# $_" }
+}
+
 ###############################################################################
 # 1) GPU detection + VRAM Query
 ###############################################################################
@@ -77,33 +88,30 @@ if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
 }
 
 ###############################################################################
-# 2) Hardcore VRAM Tier
+# 2) Model parameters (YAML source of truth, fixe par défaut)
 ###############################################################################
-# RULES:
-# - If free VRAM >= 7200 MB → use pluq4_hardcore
-# - Else → fallback to model_params_pluq4060.yaml
-
-if ($ParamsFile) {
-    $tier = "CUSTOM"
-    $paramsPath = $ParamsFile
-}
-elseif ($freeVramMb -ge 7200) {
-    $tier = "PLUQ4-HARDCORE"
-    $paramsPath = "config/model_params_pluq4_hardcore.yaml"
-}
-else {
-    $tier = "PLUQ4060"
-    $paramsPath = "config/model_params_pluq4060.yaml"
-}
-
-if (-not (Split-Path $paramsPath -IsAbsolute)) {
-    $paramsPath = Join-Path $RootDir $paramsPath
-}
-
-Write-Host "Selected Tier: $tier"
+$paramsPath = Join-Path $RootDir "config/program_input_params.yaml"
 Write-Host "Params file: $paramsPath"
 Write-Host "Training config: $trainingCfgPath"
 Write-Host "Features config: $(Join-Path $RootDir $featuresCfgRel)"
+
+# Affiche toute la config utilisée (style commentaires YAML)
+Write-Host ""
+Write-Host "# =================================================================="
+Write-Host "# CONFIG EFFECTIVE DU RUN"
+Write-Host "# =================================================================="
+Write-Host "# Fichiers utilisés:"
+Write-Host "# - training.yaml  : $trainingCfgPath"
+Write-Host "# - features.yaml  : $(Join-Path $RootDir $featuresCfgRel)"
+Write-Host "# - params (LGBM)  : $paramsPath"
+Write-Host "# - data train     : $trainPath"
+Write-Host "# - data tournament: $tourPath"
+Write-Host "# - submission     : $submissionPath"
+Write-Host "# GPU free VRAM    : $freeVramMb MB"
+Write-Host "# Params LGBM      : $paramsPath"
+Show-YamlConfig -Label "training.yaml (config globale)" -Path $trainingCfgPath
+Show-YamlConfig -Label "features.yaml (features utilisées)" -Path (Join-Path $RootDir $featuresCfgRel)
+Show-YamlConfig -Label "params LightGBM (hyperparamètres)" -Path $paramsPath
 
 ###############################################################################
 # 3) Training + Prediction
@@ -149,6 +157,5 @@ print("Upload:", resp)
 
 ###############################################################################
 Write-Host "Summary:"
-Write-Host "  Tier: $tier"
 Write-Host "  Free VRAM: $freeVramMb MB"
 Write-Host "  Params used: $paramsPath"

@@ -29,7 +29,7 @@ def parse_args() -> argparse.Namespace:
 def load_configs(config_path: str, params_path: str, features_path: str) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """Load configuration files."""
     training_cfg = utils.load_yaml(config_path)
-    params_cfg = utils.load_yaml(params_path)
+    params_cfg = utils.normalize_params(utils.load_yaml(params_path))
     features_cfg = utils.load_yaml(features_path)
     return training_cfg or {}, params_cfg or {}, features_cfg or {}
 

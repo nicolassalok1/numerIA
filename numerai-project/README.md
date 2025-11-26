@@ -24,20 +24,15 @@ pwsh -File ..\run_master_autovram.ps1
 ```
 Ce que fait le script :
 1) Détecte le GPU et lit la VRAM libre via `nvidia-smi`.
-2) Sélectionne un tier LightGBM et écrit `config/model_params_autovram.yaml` :
-   - aggressive (≥7 Go libres) : feuilles 512, 2500 arbres, feature/bagging 0.9.
-   - high (≥5 Go libres) : feuilles 256, 2000 arbres, feature/bagging 0.8.
-   - medium (≥3 Go libres) : feuilles 128, 1500 arbres, feature/bagging 0.7.
-   - safe (<3 Go libres) : feuilles 64, 1000 arbres, feature/bagging 0.6.
-   Paramètres communs : `device_type: gpu`, `gpu_device_id: 0`, `metric: mae`, `objective: regression`, `lambda_l2: 5`, etc.
+2) Utilise les hyperparamètres fixés dans `config/program_input_params.yaml` (source de vérité éditable).
 3) Télécharge les datasets Numerai si `data/numerai_training_data.parquet` ou `data/numerai_tournament_data.parquet` manquent.
 4) Lance l’entraînement :
    ```powershell
-   python src/train.py --config config/training.yaml --params config/model_params_autovram.yaml --features config/features.yaml
+   python src/train.py --config config/training.yaml --params config/program_input_params.yaml --features config/features.yaml
    ```
 5) Lance la prédiction :
    ```powershell
-   python src/predict.py --config config/training.yaml --params config/model_params_autovram.yaml --features config/features.yaml
+   python src/predict.py --config config/training.yaml --params config/program_input_params.yaml --features config/features.yaml
    ```
 6) Produit `submission.csv` à la racine du projet (chemin défini dans `config/training.yaml`).
 
@@ -75,9 +70,10 @@ Le retour doit contenir un ID de submission. Vérifier ensuite le statut sur le 
 - VRAM insuffisante : baisser les tiers (safe/medium) ou réduire `row_limit` / `max_features` dans `config/training.yaml` / `config/features.yaml`.
 
 ### 7. Références utiles
-- `run_master_autovram.ps1` : adaptation auto des params + download + train + predict.
+- `run_master_autovram.ps1` : pipeline complet (check GPU, download data, train/predict) utilisant `config/program_input_params.yaml`.
 - `run_master.sh` : équivalent bash sans auto-VRAM.
-- `config/model_params_autovram.yaml` : généré à chaque run auto-VRAM (écrasé à chaque exécution).
-- `config/model_params.yaml` : paramètres statiques par défaut (GPU).
+- `config/program_input_params.yaml` : hyperparamètres LightGBM utilisés par défaut.
+- `config/program_output_params.yaml` : emplacement de sortie s’il faut conserver des params générés automatiquement.
+- `config/model_params.yaml` : autres paramètres statiques par défaut (GPU).
 - `submission.csv` : sortie finale à soumettre.
 - Environnement GPU : LightGBM compilé CUDA 12.6 (compatible runtime driver 12.9).
