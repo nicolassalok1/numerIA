@@ -3,6 +3,38 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RootDir = $null
 
+# Conda environment activation (required; override via NUMERAI_CONDA_ENV)
+$targetCondaEnv = $env:NUMERAI_CONDA_ENV
+if (-not $targetCondaEnv) { $targetCondaEnv = "lgbm-gpu" }
+$condaActivated = $false
+
+if ($env:CONDA_DEFAULT_ENV -eq $targetCondaEnv) {
+    Write-Host "Conda env already active: $targetCondaEnv"
+    $condaActivated = $true
+}
+else {
+    $condaCmd = Get-Command conda -ErrorAction SilentlyContinue
+    if (-not $condaCmd) {
+        Write-Error "conda introuvable dans PATH; active l'environnement '$targetCondaEnv' avant de lancer."
+        exit 1
+    }
+    try {
+        # Load conda hook in this PowerShell session then activate
+        (& $condaCmd "shell.powershell" "hook") | Out-String | Invoke-Expression
+        conda activate $targetCondaEnv | Out-Null
+        Write-Host "Activated conda env: $targetCondaEnv"
+        $condaActivated = $true
+    }
+    catch {
+        Write-Error "Impossible d'activer l'environnement conda '$targetCondaEnv' : $($_.Exception.Message)"
+        exit 1
+    }
+}
+if (-not $condaActivated) {
+    Write-Error "Environnement conda '$targetCondaEnv' non actif."
+    exit 1
+}
+
 # Try current directory (if script is inside numerai-project) then sibling numerai-project
 $candidates = @(
     $ScriptDir,
@@ -22,34 +54,6 @@ if (-not $RootDir) {
 
 Set-Location $RootDir
 Write-Host "Project root: $RootDir"
-
-# Conda environment activation (optional override via NUMERAI_CONDA_ENV)
-$targetCondaEnv = $env:NUMERAI_CONDA_ENV
-if (-not $targetCondaEnv) { $targetCondaEnv = "lgbm-gpu" }
-$condaActivated = $false
-
-if ($env:CONDA_DEFAULT_ENV -eq $targetCondaEnv) {
-    Write-Host "Conda env already active: $targetCondaEnv"
-    $condaActivated = $true
-}
-else {
-    $condaCmd = Get-Command conda -ErrorAction SilentlyContinue
-    if ($condaCmd) {
-        try {
-            # Load conda hook in this PowerShell session then activate
-            (& $condaCmd "shell.powershell" "hook") | Out-String | Invoke-Expression
-            conda activate $targetCondaEnv | Out-Null
-            Write-Host "Activated conda env: $targetCondaEnv"
-            $condaActivated = $true
-        }
-        catch {
-            Write-Warning "Impossible d'activer l'environnement conda '$targetCondaEnv' : $($_.Exception.Message)"
-        }
-    }
-    else {
-        Write-Warning "conda introuvable dans PATH; utilisation de l'environnement courant."
-    }
-}
 
 # Optional local credentials file (not tracked by git)
 $keysCandidates = @(
