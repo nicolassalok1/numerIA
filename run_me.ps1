@@ -1,30 +1,68 @@
 $ErrorActionPreference = "Stop"
 
-# Locate project root
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ParentDir = Split-Path -Parent $ScriptDir
-if ((Test-Path (Join-Path $ScriptDir "config")) -and (Test-Path (Join-Path $ScriptDir "src"))) {
-    $RootDir = $ScriptDir
+$RootDir = $null
+
+# Try current directory (if script is inside numerai-project) then sibling numerai-project
+$candidates = @(
+    $ScriptDir,
+    (Join-Path $ScriptDir "numerai-project")
+)
+foreach ($c in $candidates) {
+    if ((Test-Path (Join-Path $c "config")) -and (Test-Path (Join-Path $c "src"))) {
+        $RootDir = $c
+        break
+    }
 }
-elseif ((Test-Path (Join-Path $ParentDir "config")) -and (Test-Path (Join-Path $ParentDir "src"))) {
-    $RootDir = $ParentDir
-}
-elseif (Test-Path (Join-Path $ScriptDir "numerai-project\config")) {
-    $RootDir = Join-Path $ScriptDir "numerai-project"
-}
-else {
-    Write-Error "[ERROR] Cannot locate project root."
+
+if (-not $RootDir) {
+    Write-Error "[ERROR] Cannot locate project root (config/src) from script directory: $ScriptDir"
     exit 1
 }
-Set-Location $RootDir
 
+Set-Location $RootDir
 Write-Host "Project root: $RootDir"
 
+# Conda environment activation (optional override via NUMERAI_CONDA_ENV)
+$targetCondaEnv = $env:NUMERAI_CONDA_ENV
+if (-not $targetCondaEnv) { $targetCondaEnv = "lgbm-gpu" }
+$condaActivated = $false
+
+if ($env:CONDA_DEFAULT_ENV -eq $targetCondaEnv) {
+    Write-Host "Conda env already active: $targetCondaEnv"
+    $condaActivated = $true
+}
+else {
+    $condaCmd = Get-Command conda -ErrorAction SilentlyContinue
+    if ($condaCmd) {
+        try {
+            # Load conda hook in this PowerShell session then activate
+            Invoke-Expression -Command "$(& $condaCmd shell.powershell hook)"
+            conda activate $targetCondaEnv | Out-Null
+            Write-Host "Activated conda env: $targetCondaEnv"
+            $condaActivated = $true
+        }
+        catch {
+            Write-Warning "Impossible d'activer l'environnement conda '$targetCondaEnv' : $($_.Exception.Message)"
+        }
+    }
+    else {
+        Write-Warning "conda introuvable dans PATH; utilisation de l'environnement courant."
+    }
+}
+
 # Optional local credentials file (not tracked by git)
-$localKeysPath = Join-Path $ScriptDir "keys_local.ps1"
-if (Test-Path $localKeysPath) {
-    Write-Host "Loading Numerai credentials from $localKeysPath"
-    . $localKeysPath
+$keysCandidates = @(
+    (Join-Path $ScriptDir "keys_local.ps1"),          # same folder as this script (racine numerIA)
+    (Join-Path $RootDir "keys_local.ps1"),            # racine du projet numerai-project
+    (Join-Path $RootDir "scripts/keys_local.ps1")     # emplacement historique
+)
+foreach ($candidate in $keysCandidates) {
+    if (Test-Path $candidate) {
+        Write-Host "Loading Numerai credentials from $candidate"
+        . $candidate
+        break
+    }
 }
 
 # Resolve data paths

@@ -13,7 +13,7 @@ Ce fichier est un aide-mémoire détaillé pour relancer l’entraînement/préd
 - Données déjà présentes : `data/numerai_training_data.parquet` et `data/numerai_tournament_data.parquet` doivent exister (le pipeline ne les télécharge pas automatiquement).
 
 ### 2. Scripts clés
-- `scripts/run_me.ps1` : orchestration PowerShell (détection du GPU, affichage VRAM, train + predict + upload API, vérif cred Numerai).
+- `run_me.ps1` (racine `numerIA`, un niveau au-dessus de `numerai-project`) : orchestration PowerShell (détection du GPU, affichage VRAM, train + predict + upload API, vérif cred Numerai).
 - `src/train.py` : entraînement (KFold + stacking).
 - `src/predict.py` : prédiction et génération de `submission.csv`.
 - `config/program_input_params.yaml` : hyperparamètres LightGBM utilisés par défaut.
@@ -22,9 +22,13 @@ Ce fichier est un aide-mémoire détaillé pour relancer l’entraînement/préd
 ### 3. Pipeline scripté (PowerShell)
 Ce mode détecte le GPU, affiche la VRAM libre et enchaîne train → predict → upload Numerai à partir des fichiers de config actuels. Il ne télécharge pas les datasets (ils doivent déjà être dans `data/`).
 
-Depuis `numerai-project` :
+Depuis `numerIA` (racine, dossier parent de `numerai-project`) :
 ```powershell
-pwsh -File .\scripts\run_me.ps1
+pwsh -File .\run_me.ps1
+```
+Si tu es déjà dans `numerai-project`, lance :
+```powershell
+pwsh -File ..\run_me.ps1
 ```
 Ce que fait le script :
 1) Détecte le GPU et lit la VRAM libre via `nvidia-smi` (affichage uniquement).
@@ -45,7 +49,7 @@ $env:NUMERAI_PUBLIC_ID="VRAI_PUBLIC_ID"
 $env:NUMERAI_SECRET_KEY="VRAIE_SECRET_KEY"
 $env:NUMERAI_MODEL_ID="VRAI_MODEL_ID"
 ```
-Option pratique : crée `scripts/keys_local.ps1` (déjà ignoré par git) avec ces trois lignes, il sera chargé automatiquement par `run_me.ps1`.
+Option pratique : crée `scripts/keys_local.ps1` (déjà ignoré par git) ou `keys_local.ps1` à la racine (même dossier que `run_me.ps1`) avec ces trois lignes, il sera chargé automatiquement par `run_me.ps1`.
 Le script rafraîchit aussi les datasets Numerai (`train.parquet` et `live.parquet`) avant d’entraîner/prédire, sauf si `SKIP_DATA_REFRESH=1` est défini.
 
 ### 4. Pipeline manuel (sans auto-VRAM)
@@ -85,9 +89,14 @@ Le retour doit contenir un ID de submission. Vérifier ensuite le statut sur le 
 - Paramètres manquants : le projet n’utilise plus `config/model_params.yaml`; passer `--params config/program_input_params.yaml` à `train.py` et `predict.py`.
 
 ### 7. Références utiles
-- `scripts/run_me.ps1` : pipeline complet (train + predict + upload) utilisant `config/program_input_params.yaml` (vérifie les credentials Numerai avant le run).
+- `run_me.ps1` (racine `numerIA`) : pipeline complet (train + predict + upload) utilisant `config/program_input_params.yaml` (vérifie les credentials Numerai avant le run).
 - `config/program_input_params.yaml` : hyperparamètres LightGBM (tiers agressif par défaut).
 - `config/features.yaml` / `config/training.yaml` : sélection des features et chemins des fichiers.
 - `submission.csv` : sortie finale à soumettre.
 - `setup_conda_lightgbm_cuda.ps1` : build/installation de LightGBM CUDA dans un env conda.
 - Environnement GPU : LightGBM compilé CUDA 12.6 (compatible runtime driver 12.9).
+
+
+
+
+
