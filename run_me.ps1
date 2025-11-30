@@ -37,7 +37,7 @@ else {
     if ($condaCmd) {
         try {
             # Load conda hook in this PowerShell session then activate
-            Invoke-Expression -Command "$(& $condaCmd shell.powershell hook)"
+            (& $condaCmd "shell.powershell" "hook") | Out-String | Invoke-Expression
             conda activate $targetCondaEnv | Out-Null
             Write-Host "Activated conda env: $targetCondaEnv"
             $condaActivated = $true
