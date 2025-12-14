@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
+import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -33,7 +36,7 @@ LIGHTGBM_ALIAS_GROUPS = [
 def log(message: str) -> None:
     """Minimal console logger with timestamp."""
     timestamp = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp} UTC] {message}")
+    print(f"[{timestamp} UTC] {message}", flush=True)
 
 
 def ensure_dir(path: str | Path) -> Path:
@@ -203,6 +206,93 @@ def save_submission(predictions: pd.DataFrame, output_path: str | Path) -> Path:
     predictions.to_csv(output_path, index=False)
     log(f"Saved submission: {output_path}")
     return output_path
+
+
+def env_flag(name: str, default: bool = True) -> bool:
+    """Read a boolean flag from environment variables."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    raw = str(raw).strip().lower()
+    if raw in {"1", "true", "yes", "y", "on"}:
+        return True
+    if raw in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+def format_seconds(seconds: float) -> str:
+    """Format a duration as H:MM:SS or M:SS."""
+    if seconds is None or not np.isfinite(seconds):
+        return "--:--"
+    total = int(max(0, seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+class ProgressBar:
+    """Minimal progress bar that works without external dependencies."""
+
+    def __init__(
+        self,
+        total: int,
+        *,
+        prefix: str = "",
+        width: int = 28,
+        unit: str = "it",
+        enabled: bool = True,
+        stream: Any = None,
+    ) -> None:
+        self.total = int(total) if total is not None else 0
+        self.prefix = prefix.strip()
+        self.width = int(width)
+        self.unit = unit
+        self.enabled = bool(enabled) and self.total > 0
+        self.stream = stream if stream is not None else sys.stderr
+        self.use_cr = bool(getattr(self.stream, "isatty", lambda: False)())
+        self.start = time.monotonic()
+        self.n = 0
+        self._last_len = 0
+        if self.enabled:
+            self.render("")
+
+    def update(self, n: int = 1, message: str = "") -> None:
+        if not self.enabled:
+            return
+        self.n = min(self.total, self.n + int(n))
+        self.render(message)
+        if self.n >= self.total:
+            self.close()
+
+    def render(self, message: str) -> None:
+        if not self.enabled:
+            return
+        frac = self.n / self.total if self.total else 1.0
+        filled = int(self.width * frac)
+        bar = "#" * filled + "-" * (self.width - filled)
+        elapsed = time.monotonic() - self.start
+        rate = (self.n / elapsed) if self.n > 0 and elapsed > 0 else 0.0
+        eta = ((self.total - self.n) / rate) if rate > 0 else float("nan")
+        prefix = f"{self.prefix} " if self.prefix else ""
+        msg = f" | {message}" if message else ""
+        line = f"{prefix}[{bar}] {self.n}/{self.total} ({frac * 100:5.1f}%) {format_seconds(elapsed)}<{format_seconds(eta)}{msg}"
+
+        if self.use_cr:
+            pad = " " * max(0, self._last_len - len(line))
+            print("\r" + line + pad, end="", file=self.stream, flush=True)
+            self._last_len = len(line)
+        else:
+            print(line, file=self.stream, flush=True)
+
+    def close(self) -> None:
+        if not self.enabled:
+            return
+        if self.use_cr:
+            print(file=self.stream, flush=True)
+        self.enabled = False
 
 
 def save_json(data: Any, path: str | Path) -> Path:

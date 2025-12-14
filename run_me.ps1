@@ -1,5 +1,8 @@
 $ErrorActionPreference = "Stop"
 
+# Default: enable progress bars unless explicitly disabled by caller
+if (-not $env:NUMERAI_PROGRESS) { $env:NUMERAI_PROGRESS = "1" }
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RootDir = $null
 

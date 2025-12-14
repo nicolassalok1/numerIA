@@ -36,6 +36,9 @@ class LightGBMModel:
             # Ensure early stopping follows the custom metric (corr) instead of any built-in one.
             aligned_params = dict(aligned_params)
             aligned_params["metric"] = "None"
+        # Keep LightGBM output readable (progress bars + our own logs)
+        aligned_params = dict(aligned_params)
+        aligned_params.setdefault("verbosity", -1)
         # Store aligned params to ensure predict/reload consistency
         self.params = aligned_params
         self.model = lgb.LGBMRegressor(**aligned_params)

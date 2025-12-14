@@ -5,6 +5,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Default: enable progress bars unless explicitly disabled by caller
+if (-not $env:NUMERAI_PROGRESS) { $env:NUMERAI_PROGRESS = "1" }
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $runScript = Join-Path $ScriptDir "run_me.ps1"
 $subScript = Join-Path $ScriptDir "sub_me.ps1"

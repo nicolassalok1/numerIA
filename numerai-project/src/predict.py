@@ -177,9 +177,15 @@ def predict(models_dir: Path, training_cfg: Dict[str, Any], params_cfg: Dict[str
     models, stk, aggregator = load_models(models_dir, params_cfg)
 
     preds: Dict[str, pd.Series] = {}
+    bar = utils.ProgressBar(
+        total=len(models),
+        prefix="Predict",
+        unit="model",
+        enabled=utils.env_flag("NUMERAI_PROGRESS", True),
+    )
     for name, mdl in models.items():
         preds[name] = mdl.predict(features_df).reset_index(drop=True)
-        utils.log(f"Generated predictions for {name}")
+        bar.update(1, f"{name}")
 
     base_pred_df = pd.DataFrame(preds)
     if aggregator == "ridge" and stk is not None:

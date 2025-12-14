@@ -374,9 +374,15 @@ def train_base_models(
     fitted_models: Dict[str, Any] = {}
     diagnostics: Dict[str, Any] = {"cv_folds": len(folds), "models": {}}
     lgb_eval_metric = default_lgb_eval_metric()
+    steps_per_model = (len(folds) + 1) if folds else 1
+    bar = utils.ProgressBar(
+        total=len(model_specs) * steps_per_model,
+        prefix="Train",
+        unit="step",
+        enabled=utils.env_flag("NUMERAI_PROGRESS", True),
+    )
 
     for name, builder, kind in model_specs:
-        utils.log(f"Training {name} with era-based CV ({len(folds)} folds)")
         fold_pred = np.full(len(X), np.nan, dtype=np.float32)
         fold_best_iters: List[int] = []
 
@@ -402,11 +408,12 @@ def train_base_models(
                     mdl.train(X.iloc[:train_end_row], y.iloc[:train_end_row])
 
                 fold_pred[val_start_row:val_end_row] = mdl.predict(X.iloc[val_start_row:val_end_row]).astype(np.float32)
-                utils.log(f"  Fold {fold_i}/{len(folds)} done ({name})")
+                bar.update(1, f"{name} fold {fold_i}/{len(folds)}")
         else:
             mdl = builder()
             mdl.train(X, y)
             fold_pred[:] = mdl.predict(X).astype(np.float32)
+            bar.update(1, f"{name} fit")
 
         oof_preds[name] = fold_pred
 
@@ -419,7 +426,9 @@ def train_base_models(
         else:
             final_model.train(X, y)
         fitted_models[name] = final_model
-        save_model(models_dir / f"{name}.pkl", final_model)
+        save_model(models_dir / f"{name}.pkl", final_model, quiet=True)
+        if folds:
+            bar.update(1, f"{name} final")
 
     return fitted_models, oof_preds, diagnostics
 
@@ -433,11 +442,12 @@ def train_stacker(oof_preds: pd.DataFrame, y: pd.Series, params: Dict[str, Any],
     return stk
 
 
-def save_model(path: Path, model: Any) -> None:
+def save_model(path: Path, model: Any, *, quiet: bool = False) -> None:
     """Persist model to disk."""
     utils.ensure_dir(path.parent)
     joblib.dump(model, path)
-    utils.log(f"Saved model: {path}")
+    if not quiet:
+        utils.log(f"Saved model: {path}")
 
 
 def main() -> None:
