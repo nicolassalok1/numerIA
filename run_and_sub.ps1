@@ -1,9 +1,9 @@
-$ErrorActionPreference = "Stop"
-
 param(
     [ValidateSet("run", "sub")]
     [string]$Action = "run"
 )
+
+$ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $runScript = Join-Path $ScriptDir "run_me.ps1"
