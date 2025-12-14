@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -202,3 +203,78 @@ def save_submission(predictions: pd.DataFrame, output_path: str | Path) -> Path:
     predictions.to_csv(output_path, index=False)
     log(f"Saved submission: {output_path}")
     return output_path
+
+
+def save_json(data: Any, path: str | Path) -> Path:
+    """Save JSON data to disk (UTF-8)."""
+    path = Path(path)
+    ensure_dir(path.parent)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return path
+
+
+def load_json(path: str | Path) -> Any:
+    """Load JSON data from disk."""
+    path = Path(path)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def era_slices(era_values: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (unique_eras, start_indices, end_indices) for an era-sorted array."""
+    if era_values.size == 0:
+        empty = np.array([], dtype=str)
+        empty_i = np.array([], dtype=int)
+        return empty, empty_i, empty_i
+    era_values = np.asarray(era_values)
+    start_mask = np.empty(era_values.shape[0], dtype=bool)
+    start_mask[0] = True
+    start_mask[1:] = era_values[1:] != era_values[:-1]
+    starts = np.flatnonzero(start_mask)
+    unique_eras = era_values[starts]
+    ends = np.concatenate([starts[1:], np.array([era_values.shape[0]], dtype=int)])
+    return unique_eras, starts, ends
+
+
+def pearson_corr(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Compute a safe Pearson correlation (returns 0.0 if variance is 0)."""
+    y_true = np.asarray(y_true, dtype=np.float64)
+    y_pred = np.asarray(y_pred, dtype=np.float64)
+    if y_true.size == 0 or y_pred.size == 0:
+        return float("nan")
+    y_true = y_true - y_true.mean()
+    y_pred = y_pred - y_pred.mean()
+    denom = np.sqrt(np.dot(y_true, y_true)) * np.sqrt(np.dot(y_pred, y_pred))
+    if denom == 0.0:
+        return 0.0
+    return float(np.dot(y_true, y_pred) / denom)
+
+
+def corr_by_era(era_values: np.ndarray, y_true: np.ndarray, y_pred: np.ndarray) -> pd.Series:
+    """Compute Pearson correlation per era (expects era_values aligned with y arrays)."""
+    unique_eras, starts, ends = era_slices(np.asarray(era_values))
+    corrs = np.empty(unique_eras.shape[0], dtype=np.float64)
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    for i, (s, e) in enumerate(zip(starts, ends)):
+        corrs[i] = pearson_corr(y_true[s:e], y_pred[s:e])
+    return pd.Series(corrs, index=pd.Index(unique_eras, name="era"), name="corr")
+
+
+def corr_summary(corrs: pd.Series) -> Dict[str, float]:
+    """Summarize a per-era correlation series."""
+    corrs = corrs.dropna()
+    if corrs.empty:
+        return {"mean": float("nan"), "std": float("nan"), "sharpe": float("nan"), "min": float("nan"), "max": float("nan")}
+    mean = float(corrs.mean())
+    std = float(corrs.std(ddof=0))
+    sharpe = float(mean / std) if std > 0 else float("nan")
+    return {"mean": mean, "std": std, "sharpe": sharpe, "min": float(corrs.min()), "max": float(corrs.max())}
+
+
+def rank_uniform(values: pd.Series, era: pd.Series | None = None) -> pd.Series:
+    """Rank to a [0, 1] uniform distribution, optionally per-era."""
+    if era is None:
+        ranked = values.rank(pct=True, method="first")
+    else:
+        ranked = values.groupby(era, observed=True).rank(pct=True, method="first")
+    return ranked.clip(0.0, 1.0)

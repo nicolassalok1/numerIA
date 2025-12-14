@@ -1,6 +1,8 @@
 general:
-  row_limit: 150000        # en dessous, je trouve le modèle trop fragile
+  row_limit: null          # null = utilise tout le dataset (gros, mais meilleur signal)
   n_folds: 5               # 5-fold = compromis perf/temps qui me va bien
+  holdout_eras: 50         # validation "future" (dernières eras) pour métriques corr
+  early_stopping_rounds: 200
   shuffle: true            # je shuffle toujours les folds
   stratify: false          # pas utile ici, on est en regression Numerai
 
@@ -10,3 +12,13 @@ files:
   submission: "submission.csv"
 
 seed: 42
+
+models:
+  lgb_ensemble_seeds: [42, 43, 44, 45, 46]
+  include_ridge: false
+  include_mlp: false
+  aggregator: mean
+
+prediction:
+  rank: true
+  rank_by_era: true

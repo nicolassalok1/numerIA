@@ -1,7 +1,7 @@
 """LightGBM model wrapper."""
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Dict, Any, Callable, Tuple
 
 import lightgbm as lgb
 import pandas as pd
@@ -15,10 +15,27 @@ class LightGBMModel:
     def __init__(self, params: Dict[str, Any] | None = None) -> None:
         self.params = params or {}
         self.model: lgb.LGBMRegressor | None = None
+        self.best_iteration_: int | None = None
 
-    def train(self, features: pd.DataFrame, target: pd.Series) -> None:
+    def train(
+        self,
+        features: pd.DataFrame,
+        target: pd.Series,
+        *,
+        eval_set: Tuple[pd.DataFrame, pd.Series] | None = None,
+        eval_metric: Callable[[Any, Any], Tuple[str, float, bool]] | None = None,
+        early_stopping_rounds: int | None = None,
+        num_boost_round: int | None = None,
+    ) -> None:
         """Train the LightGBM model."""
         aligned_params = utils.align_lightgbm_aliases(self.params)
+        if num_boost_round is not None:
+            aligned_params = dict(aligned_params)
+            aligned_params["n_estimators"] = int(num_boost_round)
+        if eval_metric is not None:
+            # Ensure early stopping follows the custom metric (corr) instead of any built-in one.
+            aligned_params = dict(aligned_params)
+            aligned_params["metric"] = "None"
         # Store aligned params to ensure predict/reload consistency
         self.params = aligned_params
         self.model = lgb.LGBMRegressor(**aligned_params)
@@ -27,7 +44,20 @@ class LightGBMModel:
             dummy_target = pd.Series([0.0, 0.0])
             self.model.fit(dummy, dummy_target)
             return
-        self.model.fit(features, target)
+        fit_kwargs: Dict[str, Any] = {}
+        if eval_set is not None:
+            X_val, y_val = eval_set
+            fit_kwargs["eval_set"] = [(X_val, y_val)]
+            if eval_metric is not None:
+                fit_kwargs["eval_metric"] = eval_metric
+            callbacks = []
+            if early_stopping_rounds:
+                callbacks.append(lgb.early_stopping(int(early_stopping_rounds), verbose=False))
+            if callbacks:
+                fit_kwargs["callbacks"] = callbacks
+
+        self.model.fit(features, target, **fit_kwargs)
+        self.best_iteration_ = getattr(self.model, "best_iteration_", None)
 
     def predict(self, features: pd.DataFrame) -> pd.Series:
         """Generate predictions using the trained model."""
