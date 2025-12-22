@@ -1,3 +1,5 @@
+Set-Location 'D:\PythonDProjects\Projects\numerIA'
+
 param(
     [ValidateSet("run", "sub")]
     [string]$Action = "run"
