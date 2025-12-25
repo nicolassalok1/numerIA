@@ -3,8 +3,6 @@ param(
     [string]$Action = "run"
 )
 
-Set-Location 'D:\PythonDProjects\Projects\numerIA'
-
 $ErrorActionPreference = "Stop"
 
 # Default: enable progress bars unless explicitly disabled by caller
