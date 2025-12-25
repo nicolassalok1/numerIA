@@ -9,6 +9,7 @@ Ce fichier est un aide-mémoire détaillé pour relancer l’entraînement/préd
   - Créer/mettre à jour l’environnement GPU : `pwsh -File ..\setup_conda_lightgbm_cuda.ps1 -EnvName lgbm-gpu -PythonVersion 3.11`.
   - Vérifier l’env : `micromamba run -n lgbm-gpu python -c "import lightgbm, sys; print(lightgbm.__version__, sys.version)"`.
   - Test GPU rapide : `python ..\test_lightgbm_gpu.py` (attendu : `device: cuda`).
+  - Env standard (CPU) avec `environment.yml` : `pwsh -File ..\setup_conda_env.ps1` (crée/met à jour `numerai-env`).
 - Stockage : données Numerai dans `data/`, modèles dans `models/`, scripts dans `src/`.
 - Données déjà présentes : `data/numerai_training_data.parquet` et `data/numerai_tournament_data.parquet` doivent exister (le pipeline ne les télécharge pas automatiquement).
 
@@ -94,6 +95,7 @@ Le retour doit contenir un ID de submission. Vérifier ensuite le statut sur le 
 - `config/features.yaml` / `config/training.yaml` : sélection des features et chemins des fichiers.
 - `submission.csv` : sortie finale à soumettre.
 - `setup_conda_lightgbm_cuda.ps1` : build/installation de LightGBM CUDA dans un env conda.
+- `setup_conda_env.ps1` : création/mise à jour de l'env conda standard (numerai-env) depuis `numerai-project\environment.yml`.
 - Environnement GPU : LightGBM compilé CUDA 12.6 (compatible runtime driver 12.9).
 
 
