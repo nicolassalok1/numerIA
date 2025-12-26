@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 # Conda activation (required)
 $targetCondaEnv = $env:NUMERAI_CONDA_ENV
-if (-not $targetCondaEnv) { $targetCondaEnv = "lgbm-gpu" }
+if (-not $targetCondaEnv) { $targetCondaEnv = "numerai-env" }
 $condaActivated = $false
 if ($env:CONDA_DEFAULT_ENV -eq $targetCondaEnv) {
     Write-Host "Conda env already active: $targetCondaEnv"
@@ -52,6 +52,40 @@ if (-not $RootDir) {
 
 Set-Location $RootDir
 Write-Host "Project root: $RootDir"
+
+# Optional .env at repo root (do not override existing env vars)
+function Import-DotEnv {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $false }
+    $lines = Get-Content -Path $Path
+    foreach ($line in $lines) {
+        $trim = $line.Trim()
+        if (-not $trim) { continue }
+        if ($trim.StartsWith("#")) { continue }
+        if ($trim.StartsWith("export ")) { $trim = $trim.Substring(7).Trim() }
+        $parts = $trim -split "=", 2
+        if ($parts.Count -ne 2) { continue }
+        $key = $parts[0].Trim()
+        if (-not $key) { continue }
+        $value = $parts[1].Trim()
+        if ($value.Length -ge 2) {
+            $doubleQuoted = $value.StartsWith('"') -and $value.EndsWith('"')
+            $singleQuoted = $value.StartsWith("'") -and $value.EndsWith("'")
+            if ($doubleQuoted -or $singleQuoted) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+        }
+        if (-not [System.Environment]::GetEnvironmentVariable($key)) {
+            [System.Environment]::SetEnvironmentVariable($key, $value, "Process")
+        }
+    }
+    return $true
+}
+
+$dotenvPath = Join-Path $ScriptDir ".env"
+if (Import-DotEnv -Path $dotenvPath) {
+    Write-Host "Loaded env vars from $dotenvPath"
+}
 
 # Optional local credentials file (not tracked by git)
 $keysCandidates = @(
