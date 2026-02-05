@@ -63,54 +63,63 @@ def load_models(models_dir: Path) -> Tuple[Dict[str, Any], Any | None, str]:
     return models, stacker, aggregator
 
 
-def build_predict_fn(
-    models: Dict[str, Any],
-    stacker: Any | None,
-    aggregator: str,
-    feature_cols: List[str],
-    *,
-    do_rank: bool,
-    rank_by_era: bool,
-) -> Any:
-    """Return a Numerai-compatible predict(live_features) function."""
+def rank_uniform(values: pd.Series, era: pd.Series | None = None) -> pd.Series:
+    """Rank to a [0, 1] uniform distribution, optionally per-era."""
+    if era is None:
+        ranked = values.rank(pct=True, method="first")
+    else:
+        ranked = values.groupby(era, observed=True).rank(pct=True, method="first")
+    return ranked.clip(0.0, 1.0)
 
-    def rank_uniform(values: pd.Series, era: pd.Series | None = None) -> pd.Series:
-        if era is None:
-            ranked = values.rank(pct=True, method="first")
-        else:
-            ranked = values.groupby(era, observed=True).rank(pct=True, method="first")
-        return ranked.clip(0.0, 1.0)
 
-    def predict(live_features: pd.DataFrame) -> pd.DataFrame:
+class Predictor:
+    """Callable predictor object for Numerai model upload."""
+
+    def __init__(
+        self,
+        models: Dict[str, Any],
+        stacker: Any | None,
+        aggregator: str,
+        feature_cols: List[str],
+        *,
+        do_rank: bool,
+        rank_by_era: bool,
+    ) -> None:
+        self.models = models
+        self.stacker = stacker
+        self.aggregator = aggregator
+        self.feature_cols = feature_cols
+        self.do_rank = do_rank
+        self.rank_by_era = rank_by_era
+
+    def __call__(self, live_features: pd.DataFrame) -> pd.DataFrame:
         # Ensure required feature columns exist in live_features
         df = live_features.copy()
-        for col in feature_cols:
+        for col in self.feature_cols:
             if col not in df.columns:
                 df[col] = 0.0
-        features_df = df[feature_cols].astype(np.float32, copy=False)
+        features_df = df[self.feature_cols].astype(np.float32, copy=False)
 
         preds: Dict[str, pd.Series] = {}
-        for name, mdl in models.items():
+        for name, mdl in self.models.items():
             preds[name] = pd.Series(mdl.predict(features_df), index=features_df.index)
 
         base_pred_df = pd.DataFrame(preds)
-        if aggregator == "ridge" and stacker is not None:
+        if self.aggregator == "ridge" and self.stacker is not None:
             try:
-                final_pred = pd.Series(stacker.predict(base_pred_df), index=features_df.index)
+                final_pred = pd.Series(self.stacker.predict(base_pred_df), index=features_df.index)
             except Exception:
                 final_pred = base_pred_df.mean(axis=1)
         else:
             final_pred = base_pred_df.mean(axis=1)
 
-        if do_rank:
-            if rank_by_era and "era" in df.columns:
+        if self.do_rank:
+            if self.rank_by_era and "era" in df.columns:
                 final_pred = rank_uniform(final_pred, era=df["era"])
             else:
                 final_pred = rank_uniform(final_pred)
 
         return pd.DataFrame({"prediction": final_pred}, index=live_features.index)
-
-    return predict
 
 
 def main() -> None:
@@ -137,7 +146,7 @@ def main() -> None:
     rank_by_era = bool((training_cfg.get("prediction", {}) or {}).get("rank_by_era", True))
 
     models, stacker, aggregator = load_models(models_dir)
-    predict_fn = build_predict_fn(
+    predictor = Predictor(
         models,
         stacker,
         aggregator,
@@ -146,11 +155,14 @@ def main() -> None:
         rank_by_era=rank_by_era,
     )
 
-    import cloudpickle
+    try:
+        import cloudpickle as serializer  # type: ignore
+    except Exception:
+        import pickle as serializer
 
     output_path = (project_root / args.output).resolve()
     with output_path.open("wb") as f:
-        f.write(cloudpickle.dumps(predict_fn))
+        f.write(serializer.dumps(predictor))
     print(f"Saved model upload pickle: {output_path}")
 
 
