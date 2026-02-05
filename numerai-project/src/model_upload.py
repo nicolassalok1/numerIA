@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -120,6 +121,8 @@ def main() -> None:
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.append(str(project_root))
     models_dir = (project_root / args.models_dir).resolve()
     training_cfg = load_yaml(project_root / args.training_config)
 

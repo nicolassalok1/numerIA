@@ -13,3 +13,4 @@ dependencies:
   - pip:
       - joblib
       - numerapi
+      - cloudpickle
