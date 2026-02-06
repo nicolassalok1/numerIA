@@ -96,6 +96,14 @@ Le retour doit contenir un ID de submission. Vérifier ensuite le statut sur le 
 - `setup_conda_lightgbm_cuda.ps1` : build/installation de LightGBM CUDA dans un env conda.
 - Environnement GPU : LightGBM compilé CUDA 12.6 (compatible runtime driver 12.9).
 
+### 8. Signals v2 (tournament 11)
+- Script dédié (racine `numerIA`) : `run_signals_v2.ps1` pour entraîner sur Signals, générer `signals.pkl` et le copier dans `numerai-project/signals-node`.
+- Dataset Signals (par défaut) : version `signals/v2.1` (modifiable via `NUMERAI_SIGNALS_VERSION`).
+- Node Signals via Numerai CLI (exemple) :
+  - `numerai node -m <MODEL_NAME> -t 11 config -e signals-python3 -p "D:\PythonDProjects\numerIA\numerai-project\signals-node"`
+  - `numerai node -m <MODEL_NAME> -t 11 deploy`
+  - `numerai node -m <MODEL_NAME> -t 11 test`
+
 
 
 
