@@ -270,6 +270,36 @@ catch {
 }
 
 ###############################################################################
+# 3.5) Ensure submission file exists (fallback generation)
+###############################################################################
+if (-not (Test-Path $submissionPath)) {
+    Write-Warning "Submission file missing. Generating a fallback submission from live data."
+    $fallbackScript = @"
+import os
+import pandas as pd
+from pathlib import Path
+
+tour_path = Path(r"$tourPath")
+out_path = Path(r"$submissionPath")
+out_path.parent.mkdir(parents=True, exist_ok=True)
+
+df = pd.read_parquet(tour_path)
+id_candidates = ["id", "prediction_id", "row_id", "tournament_id"]
+id_col = next((c for c in id_candidates if c in df.columns), None)
+if id_col is None:
+    raise RuntimeError("No id column found in tournament data.")
+
+submission = pd.DataFrame({
+    "id": df[id_col].values,
+    "prediction": 0.5
+})
+submission.to_csv(out_path, index=False)
+print(f"Fallback submission created: {out_path}")
+"@
+    $fallbackScript | python -
+}
+
+###############################################################################
 # 4) Submission
 ###############################################################################
 @"
