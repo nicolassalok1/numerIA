@@ -3,7 +3,7 @@ param(
     [string]$Action = "run"
 )
 
-Set-Location 'D:\PythonDProjects\Projects\numerIA'
+Set-Location 'D:\PythonDProjects\numerIA'
 
 $ErrorActionPreference = "Stop"
 

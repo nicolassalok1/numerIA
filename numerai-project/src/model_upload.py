@@ -32,6 +32,9 @@ def load_json(path: Path) -> Dict[str, Any]:
 
 def load_models(models_dir: Path) -> Tuple[Dict[str, Any], Any | None, str]:
     """Load fitted base models and optional stacker."""
+    def unwrap(obj: Any) -> Any:
+        return getattr(obj, "model", None) or obj
+
     spec = load_json(models_dir / "model_spec.json")
     base_models = spec.get("base_models") or []
     aggregator = str(spec.get("aggregator", "mean")).strip().lower()
@@ -47,13 +50,13 @@ def load_models(models_dir: Path) -> Tuple[Dict[str, Any], Any | None, str]:
         path = models_dir / f"{name}.pkl"
         if not path.exists():
             continue
-        models[name] = joblib.load(path)
+        models[name] = unwrap(joblib.load(path))
 
     stacker = None
     if aggregator == "ridge":
         stacker_path = models_dir / "stacker.pkl"
         if stacker_path.exists():
-            stacker = joblib.load(stacker_path)
+            stacker = unwrap(joblib.load(stacker_path))
         else:
             aggregator = "mean"
 
@@ -158,7 +161,10 @@ def main() -> None:
     try:
         import cloudpickle as serializer  # type: ignore
     except Exception:
-        import pickle as serializer
+        try:
+            from joblib.externals import cloudpickle as serializer  # type: ignore
+        except Exception:
+            import pickle as serializer
 
     output_path = (project_root / args.output).resolve()
     with output_path.open("wb") as f:
