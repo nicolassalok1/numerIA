@@ -100,3 +100,9 @@ Le retour doit contenir un ID de submission. Vérifier ensuite le statut sur le 
 
 
 
+
+
+
+
+(base) PS D:\PythonDProjects\numerIA> C:\Users\nicol\AppData\Roaming\Python\Python313\Scripts\numerai.exe upgrade
+Upgrading, do not interrupt or else your environment may be corrupted.
