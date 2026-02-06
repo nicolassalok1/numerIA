@@ -227,13 +227,18 @@ def prepare_training_frame(training_cfg: Dict[str, Any], features_cfg: Dict[str,
     elif schema_cols:
         target_col = utils.find_target_column(schema_cols)
 
-    columns_to_read = None
-    if feature_cols:
-        columns_to_read = ["era"] + feature_cols
-        if target_col:
-            columns_to_read.append(target_col)
-        if schema_cols and "date" in schema_cols:
+    columns_to_read: List[str] = []
+    if schema_cols:
+        if "era" in schema_cols:
+            columns_to_read.append("era")
+        elif "date" in schema_cols:
             columns_to_read.append("date")
+    if feature_cols:
+        columns_to_read.extend(feature_cols)
+    if target_col:
+        columns_to_read.append(target_col)
+    if not columns_to_read:
+        columns_to_read = []
     df = utils.safe_read_parquet(train_path, columns=columns_to_read or None)
 
     if df.empty:

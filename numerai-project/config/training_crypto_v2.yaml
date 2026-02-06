@@ -11,9 +11,8 @@ files:
   tournament: "data/crypto_v2/r1198__crypto_v2_0_live.parquet"
   submission: "submission_crypto_v2.csv"
 
-# Si le dataset crypto contient plusieurs targets (ex: target_20d), décommente:
-# targets:
-#   column: "target_20d"
+targets:
+  column: "target_binned_return_20"
 
 seed: 42
 

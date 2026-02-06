@@ -1,8 +1,9 @@
 $ErrorActionPreference = "Stop"
 
 # Conda activation (required)
-$targetCondaEnv = $env:NUMERAI_CONDA_ENV
-if (-not $targetCondaEnv) { $targetCondaEnv = "lgbm-gpu" }
+$targetCondaEnv = "lgbm-gpu"
+# $targetCondaEnv = $env:NUMERAI_CONDA_ENV
+# if (-not $targetCondaEnv) { $targetCondaEnv = "lgbm-gpu" }
 $condaActivated = $false
 if ($env:CONDA_DEFAULT_ENV -eq $targetCondaEnv) {
     Write-Host "Conda env already active: $targetCondaEnv"
@@ -14,7 +15,38 @@ else {
         Write-Error "conda introuvable dans PATH; active l'environnement '$targetCondaEnv' avant de lancer."
         exit 1
     }
+    function Resolve-EnvFile {
+        param([string]$BaseDir)
+        $candidates = @(
+            (Join-Path $BaseDir "numerai-project\environment.yml"),
+            (Join-Path $BaseDir "environment.yml")
+        )
+        foreach ($p in $candidates) {
+            if (Test-Path $p) { return $p }
+        }
+        return $null
+    }
+    function Ensure-CondaEnv {
+        param([string]$EnvName, [string]$EnvFile)
+        $envList = & $condaCmd "env" "list"
+        $pattern = "^\s*$([regex]::Escape($EnvName))\s"
+        $exists = $envList | Select-String -Pattern $pattern
+        if (-not $exists) {
+            if (-not $EnvFile) {
+                Write-Error "Conda env '$EnvName' introuvable et aucun environment.yml trouvé pour le créer."
+                exit 1
+            }
+            Write-Host "Creating conda env '$EnvName' from $EnvFile"
+            & $condaCmd "env" "create" "-n" $EnvName "-f" $EnvFile
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "Echec creation conda env '$EnvName'."
+                exit 1
+            }
+        }
+    }
     try {
+        $envFile = Resolve-EnvFile -BaseDir $ScriptDir
+        Ensure-CondaEnv -EnvName $targetCondaEnv -EnvFile $envFile
         (& $condaCmd "shell.powershell" "hook") | Out-String | Invoke-Expression
         conda activate $targetCondaEnv | Out-Null
         Write-Host "Activated conda env: $targetCondaEnv"

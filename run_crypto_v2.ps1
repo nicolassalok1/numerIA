@@ -6,13 +6,45 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RootDir = $null
 
 # Optional conda activation (reuse same env name as run_me.ps1)
-$targetCondaEnv = $env:NUMERAI_CONDA_ENV
-if (-not $targetCondaEnv) { $targetCondaEnv = "lgbm-gpu" }
+$targetCondaEnv = "lgbm-gpu"
+# $targetCondaEnv = $env:NUMERAI_CONDA_ENV
+# if (-not $targetCondaEnv) { $targetCondaEnv = "lgbm-gpu" }
 
 if ($env:CONDA_DEFAULT_ENV -ne $targetCondaEnv) {
     $condaCmd = Get-Command conda -ErrorAction SilentlyContinue
     if ($condaCmd) {
         try {
+            function Resolve-EnvFile {
+                param([string]$BaseDir)
+                $candidates = @(
+                    (Join-Path $BaseDir "numerai-project\environment.yml"),
+                    (Join-Path $BaseDir "environment.yml")
+                )
+                foreach ($p in $candidates) {
+                    if (Test-Path $p) { return $p }
+                }
+                return $null
+            }
+            function Ensure-CondaEnv {
+                param([string]$EnvName, [string]$EnvFile)
+                $envList = & $condaCmd "env" "list"
+                $pattern = "^\s*$([regex]::Escape($EnvName))\s"
+                $exists = $envList | Select-String -Pattern $pattern
+                if (-not $exists) {
+                    if (-not $EnvFile) {
+                        Write-Error "Conda env '$EnvName' introuvable et aucun environment.yml trouvé pour le créer."
+                        exit 1
+                    }
+                    Write-Host "Creating conda env '$EnvName' from $EnvFile"
+                    & $condaCmd "env" "create" "-n" $EnvName "-f" $EnvFile
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Error "Echec creation conda env '$EnvName'."
+                        exit 1
+                    }
+                }
+            }
+            $envFile = Resolve-EnvFile -BaseDir $ScriptDir
+            Ensure-CondaEnv -EnvName $targetCondaEnv -EnvFile $envFile
             (& $condaCmd "shell.powershell" "hook") | Out-String | Invoke-Expression
             conda activate $targetCondaEnv | Out-Null
             Write-Host "Activated conda env: $targetCondaEnv"

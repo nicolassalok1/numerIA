@@ -20,6 +20,7 @@ LIVE_FILENAME = os.getenv("NUMERAI_CRYPTO_LIVE_FILE", "").strip()
 MODEL_PATH = os.getenv("MODEL_PATH", "salok1.pkl")
 PREDICTIONS_PATH = os.getenv("PREDICTIONS_PATH", "predictions.csv")
 RANK_UNIFORM = os.getenv("NUMERAI_RANK_UNIFORM", "1").lower() not in {"0", "false", "no"}
+SKIP_UPLOAD = os.getenv("NUMERAI_SKIP_UPLOAD", "").lower() in {"1", "true", "yes", "y", "on"}
 
 DEFAULT_MODEL_ID = None
 DEFAULT_PUBLIC_ID = None
@@ -216,8 +217,12 @@ def main() -> None:
         index = live_universe.index
     predictions = pd.DataFrame({"prediction": preds.values}, index=index)
 
-    logging.info("Writing predictions and submitting")
+    logging.info("Writing predictions")
     predictions.to_csv(PREDICTIONS_PATH, index=True)
+    if SKIP_UPLOAD:
+        logging.info("Skipping upload (NUMERAI_SKIP_UPLOAD=1)")
+        return
+    logging.info("Submitting predictions")
     napi.upload_predictions(PREDICTIONS_PATH, model_id=MODEL_ID, tournament=TOURNAMENT)
 
 
