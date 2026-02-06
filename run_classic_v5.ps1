@@ -74,16 +74,16 @@ if (-not $RootDir) {
 Set-Location $RootDir
 Write-Host "Project root: $RootDir"
 
-$trainingCfgRel = "config/training_signals_v2.yaml"
-$featuresCfgRel = "config/features_signals_v2.yaml"
+$trainingCfgRel = "config/training.yaml"
+$featuresCfgRel = "config/features.yaml"
 $paramsRel = "config/program_input_params.yaml"
 
 $trainingCfgPath = Join-Path $RootDir $trainingCfgRel
 $featuresCfgPath = Join-Path $RootDir $featuresCfgRel
 $paramsPath = Join-Path $RootDir $paramsRel
 
-$trainPath = Join-Path $RootDir "data/signals_v2/train.parquet"
-$livePath  = Join-Path $RootDir "data/signals_v2/live.parquet"
+$trainPath = Join-Path $RootDir "data/numerai_training_data.parquet"
+$livePath  = Join-Path $RootDir "data/numerai_tournament_data.parquet"
 
 if (Test-Path $trainingCfgPath) {
     if (Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue) {
@@ -97,41 +97,23 @@ if (Test-Path $trainingCfgPath) {
 if (-not (Split-Path $trainPath -IsAbsolute)) { $trainPath = Join-Path $RootDir $trainPath }
 if (-not (Split-Path $livePath -IsAbsolute))  { $livePath  = Join-Path $RootDir $livePath }
 
-$samplesDir = Join-Path $ScriptDir "signals\v2.1\SAMPLES"
-$sampleTrain = Join-Path $samplesDir "train.parquet"
-$sampleLive = Join-Path $samplesDir "live.parquet"
-$useLocalSamples = $false
-if ((Test-Path $sampleTrain) -and (Test-Path $sampleLive)) {
-    Write-Host "Local Signals samples detected: $samplesDir"
-    if (-not (Test-Path $trainPath)) {
-        New-Item -ItemType Directory -Force -Path (Split-Path $trainPath -Parent) | Out-Null
-        Copy-Item -Path $sampleTrain -Destination $trainPath -Force
-    }
-    if (-not (Test-Path $livePath)) {
-        New-Item -ItemType Directory -Force -Path (Split-Path $livePath -Parent) | Out-Null
-        Copy-Item -Path $sampleLive -Destination $livePath -Force
-    }
-    $useLocalSamples = $true
-}
+if (-not $env:SKIP_DATA_REFRESH) {
+    $classicVersion = $env:NUMERAI_CLASSIC_VERSION
+    if (-not $classicVersion) { $classicVersion = "v5.2" }
+    $classicVersion = $classicVersion.TrimEnd("/")
 
-if (-not $env:SKIP_DATA_REFRESH -and -not $useLocalSamples) {
-    $signalsVersion = $env:NUMERAI_SIGNALS_VERSION
-    if (-not $signalsVersion) { $signalsVersion = "signals/v2.1" }
-    $signalsVersion = $signalsVersion.TrimEnd("/")
-    if ($signalsVersion -notmatch "/") { $signalsVersion = "signals/$signalsVersion" }
-
-    Write-Host "Refreshing Numerai Signals datasets ($signalsVersion)..."
+    Write-Host "Refreshing Numerai Classic datasets ($classicVersion)..."
     $downloadScript = @"
 from pathlib import Path
-from numerapi import SignalsAPI
+from numerapi import NumerAPI
 
-signals_version = r"$signalsVersion"
+classic_version = r"$classicVersion"
 train_path = Path(r"$trainPath")
 live_path = Path(r"$livePath")
 train_path.parent.mkdir(parents=True, exist_ok=True)
 live_path.parent.mkdir(parents=True, exist_ok=True)
 
-api = SignalsAPI()
+api = NumerAPI()
 
 def download(src: str, dest: Path) -> None:
     try:
@@ -140,8 +122,8 @@ def download(src: str, dest: Path) -> None:
     except Exception as exc:
         print(f"DOWNLOAD_WARNING {src}: {exc}")
 
-download(f"{signals_version}/train.parquet", train_path)
-download(f"{signals_version}/live.parquet", live_path)
+download(f"{classic_version}/train.parquet", train_path)
+download(f"{classic_version}/live.parquet", live_path)
 "@
     $downloadScript | python -
 }
@@ -165,18 +147,18 @@ try {
     & python "src/model_upload.py" `
         --models-dir "models" `
         --training-config $trainingCfgPath `
-        --output "signals.pkl"
+        --output "salok1.pkl"
 }
 catch {
     Write-Error "Model upload pickle build failed: $($_.Exception.Message)"
     exit 1
 }
 
-$signalsNodeDir = Join-Path $RootDir "signals-node"
-if (Test-Path $signalsNodeDir) {
-    Copy-Item -Path (Join-Path $RootDir "signals.pkl") -Destination (Join-Path $signalsNodeDir "signals.pkl") -Force
-    Write-Host "Copied signals.pkl to $signalsNodeDir"
+$classicNodeDir = Join-Path $RootDir "classic-node"
+if (Test-Path $classicNodeDir) {
+    Copy-Item -Path (Join-Path $RootDir "salok1.pkl") -Destination (Join-Path $classicNodeDir "salok1.pkl") -Force
+    Write-Host "Copied salok1.pkl to $classicNodeDir"
 }
 else {
-    Write-Warning "signals-node not found at $signalsNodeDir. Copy manually."
+    Write-Warning "classic-node not found at $classicNodeDir. Copy manually."
 }

@@ -104,6 +104,11 @@ Le retour doit contenir un ID de submission. Vérifier ensuite le statut sur le 
   - `numerai node -m <MODEL_NAME> -t 11 deploy`
   - `numerai node -m <MODEL_NAME> -t 11 test`
 
+### 9. Automatisation quotidienne (Classic + Signals + Crypto)
+- Script racine : `daily_retrain_deploy.ps1`
+- Il enchaîne : entraînement + génération des pickles + `numerai node deploy` pour les 3 tournois.
+- Optionnel : `NUMERAI_DAILY_TEST=1` pour exécuter un `test` après deploy.
+
 
 
 
