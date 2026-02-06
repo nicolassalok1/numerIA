@@ -1,104 +1,289 @@
-""" Sample tournament model in python 3 """
+"""Numerai Signals prediction script (loads a pre-trained pickle if available)."""
+from __future__ import annotations
 
-import os
-import json
+import hashlib
 import logging
+import os
+from pathlib import Path
+from typing import Any, List, Sequence
+
 import joblib
 import numerapi
+import numpy as np
 import pandas as pd
-import lightgbm as lgbm
 
-logging.basicConfig(filename="log.txt", filemode="a")
+logging.basicConfig(filename="log.txt", filemode="a", level=logging.INFO)
 
 TOURNAMENT = 11
-DATA_VERSION = "signals/v1.0"
-TARGET_COL = "target"
-TRAINED_MODEL_PREFIX = "./trained_model"
+DATA_VERSION = os.getenv("NUMERAI_SIGNALS_VERSION", "signals/v2.1").strip() or "signals/v2.1"
+LIVE_DATASET = os.getenv("NUMERAI_SIGNALS_LIVE_DATASET", "").strip()
+LIVE_FILENAME = os.getenv("NUMERAI_SIGNALS_LIVE_FILE", "").strip()
+MODEL_PATH = os.getenv("MODEL_PATH", "signals.pkl")
+PREDICTIONS_PATH = os.getenv("PREDICTIONS_PATH", "predictions.csv")
+RANK_UNIFORM = os.getenv("NUMERAI_RANK_UNIFORM", "1").lower() not in {"0", "false", "no"}
+SKIP_UPLOAD = os.getenv("NUMERAI_SKIP_UPLOAD", "").lower() in {"1", "true", "yes", "y", "on"}
 
 DEFAULT_MODEL_ID = None
 DEFAULT_PUBLIC_ID = None
 DEFAULT_SECRET_KEY = None
 
-# Read model id and initialize API client with api keys
-# these are set by the docker image that you deploy after training,
-# but you can also set them manually above for local testing
-MODEL_ID = os.getenv("MODEL_ID", DEFAULT_MODEL_ID)
-napi = numerapi.NumerAPI(
+MODEL_ID = (
+    os.getenv("MODEL_ID")
+    or os.getenv("NUMERAI_SIGNALS_MODEL_ID")
+    or os.getenv("NUMERAI_MODEL_ID")
+    or DEFAULT_MODEL_ID
+)
+
+sapi = numerapi.SignalsAPI(
     public_id=os.getenv("NUMERAI_PUBLIC_ID", DEFAULT_PUBLIC_ID),
     secret_key=os.getenv("NUMERAI_SECRET_KEY", DEFAULT_SECRET_KEY),
 )
 
 
-def train(napi, model_id, force_training=False):
-    model_name = TRAINED_MODEL_PREFIX
-    if model_id:
-        model_name += f"_{model_id}"
+def _safe_load_model(path: str | Path) -> Any | None:
+    model_path = Path(path)
+    if not model_path.exists():
+        logging.warning("Model file not found: %s", model_path)
+        return None
+    try:
+        return joblib.load(model_path)
+    except Exception as exc:
+        logging.warning("joblib.load failed: %s", exc)
+        data = model_path.read_bytes()
+        try:
+            import cloudpickle as serializer  # type: ignore
+        except Exception:
+            import pickle as serializer  # type: ignore
+    return serializer.loads(data)
 
-    # load a model if we have a trained model already and we aren't forcing a training session
-    if os.path.exists(model_name) and not force_training:
-        logging.info("loading existing trained model")
-        model = joblib.load(model_name)
-        return model
 
-    logging.info("reading training data")
-    napi.download_dataset(f"{DATA_VERSION}/train.parquet")
-    train_data = pd.read_parquet(f"{DATA_VERSION}/train.parquet")
-    feature_cols = [
-        col
-        for col in train_data.columns
-        if col.startswith('feature_')
-        and col not in ("feature_country", "feature_exchange_code")
+def _download_first_available(datasets: Sequence[str]) -> str:
+    errors: List[str] = []
+    for dataset in datasets:
+        if not dataset:
+            continue
+        try:
+            logging.info("Attempting download: %s", dataset)
+            return sapi.download_dataset(dataset)
+        except Exception as exc:
+            msg = f"{dataset}: {exc}"
+            errors.append(msg)
+            logging.warning("Failed to download %s: %s", dataset, exc)
+    # Fallback: query available datasets and pick a live.parquet
+    try:
+        available = sapi.list_datasets()
+        live_candidates = [d for d in available if d.endswith("/live.parquet") or d.endswith("live.parquet")]
+        if live_candidates:
+            # Prefer v2.1, then v2.0, then first match
+            preferred = None
+            for pref in ("signals/v2.1/live.parquet", "signals/v2.0/live.parquet"):
+                if pref in live_candidates:
+                    preferred = pref
+                    break
+            chosen = preferred or live_candidates[0]
+            logging.info("Fallback dataset selected: %s", chosen)
+            return sapi.download_dataset(chosen)
+    except Exception as exc:
+        logging.warning("Fallback list_datasets failed: %s", exc)
+        errors.append(f"list_datasets: {exc}")
+    raise RuntimeError(
+        "Failed to download any live dataset. Check NUMERAI_SIGNALS_LIVE_DATASET. "
+        + " | ".join(errors[-5:])
+    )
+
+
+def _maybe_extract_features(model: Any) -> List[str] | None:
+    if isinstance(model, dict):
+        for key in ("feature_cols", "feature_columns", "features"):
+            cols = model.get(key)
+            if isinstance(cols, (list, tuple)) and cols and all(isinstance(c, str) for c in cols):
+                return list(cols)
+    for attr in ("feature_cols", "feature_columns", "feature_names_in_"):
+        cols = getattr(model, attr, None)
+        if isinstance(cols, (list, tuple, np.ndarray)):
+            cols_list = [str(c) for c in list(cols)]
+            return cols_list if cols_list else None
+    for attr in ("feature_name_",):
+        cols = getattr(model, attr, None)
+        if isinstance(cols, (list, tuple)) and cols:
+            return [str(c) for c in cols]
+    feature_name_fn = getattr(model, "feature_name", None)
+    if callable(feature_name_fn):
+        try:
+            cols = feature_name_fn()
+            if isinstance(cols, (list, tuple)) and cols:
+                return [str(c) for c in cols]
+        except Exception:
+            pass
+    booster = getattr(model, "booster_", None)
+    if booster is not None:
+        feature_name_fn = getattr(booster, "feature_name", None)
+        if callable(feature_name_fn):
+            try:
+                cols = feature_name_fn()
+                if isinstance(cols, (list, tuple)) and cols:
+                    return [str(c) for c in cols]
+            except Exception:
+                pass
+    return None
+
+
+def _unwrap_model_and_features(model: Any) -> tuple[Any, List[str] | None]:
+    if isinstance(model, dict) and "model" in model:
+        return model.get("model"), _maybe_extract_features(model)
+    if isinstance(model, (list, tuple)) and len(model) == 2:
+        maybe_cols = model[1]
+        if isinstance(maybe_cols, (list, tuple)) and all(isinstance(c, str) for c in maybe_cols):
+            return model[0], list(maybe_cols)
+    return model, _maybe_extract_features(model)
+
+
+def _iter_ensemble(model: Any) -> List[Any] | None:
+    if isinstance(model, dict):
+        if "models" in model and isinstance(model["models"], (list, tuple)):
+            return list(model["models"])
+        if model and all(hasattr(v, "predict") for v in model.values()):
+            return list(model.values())
+    if isinstance(model, (list, tuple)) and model and all(hasattr(v, "predict") for v in model):
+        return list(model)
+    return None
+
+
+def _rank_uniform(values: pd.Series) -> pd.Series:
+    ranked = values.rank(pct=True, method="first")
+    return ranked.clip(0.0, 1.0)
+
+
+def _default_feature_cols(live_universe: pd.DataFrame) -> List[str]:
+    feature_cols = [c for c in live_universe.columns if c.startswith("feature")]
+    if feature_cols:
+        return feature_cols
+    exclude = {"numerai_ticker", "ticker", "symbol", "date", "era", "target", "signal", "prediction"}
+    numeric_cols = [
+        c for c in live_universe.columns
+        if c not in exclude and pd.api.types.is_numeric_dtype(live_universe[c])
     ]
-
-    # This will take a few minutes 🍵
-    logging.info("training model")
-    model = lgbm.LGBMRegressor(
-        n_estimators=2000,
-        learning_rate=0.01,
-        max_depth=5,
-        num_leaves=2**5 - 1,
-        colsample_bytree=0.1,
-    )
-    model.fit(train_data[feature_cols], train_data["target"])
-
-    logging.info("saving model")
-    joblib.dump(model, model_name)
-    return model
+    if numeric_cols:
+        return numeric_cols
+    return [c for c in live_universe.columns if c not in exclude]
 
 
-def predict(napi, model):
-    logging.info("reading prediction data")
-    napi.download_dataset(f"{DATA_VERSION}/live.parquet")
-    predict_data = pd.read_parquet(f"{DATA_VERSION}/live.parquet").set_index(
-        'numerai_ticker'
-    )
-    feature_cols = [
-        col
-        for col in predict_data.columns
-        if col.startswith('feature_')
-        and col not in ("feature_country", "feature_exchange_code")
-    ]
-    print(predict_data)
+def _predict_with_model(model: Any, live_universe: pd.DataFrame) -> pd.Series:
+    ensemble = _iter_ensemble(model)
+    if ensemble:
+        feature_cols = _maybe_extract_features(ensemble[0]) or _default_feature_cols(live_universe)
+        df = live_universe.copy()
+        for col in feature_cols:
+            if col not in df.columns:
+                df[col] = 0.0
+        features = df[feature_cols].astype(np.float32, copy=False)
+        preds = []
+        for mdl in ensemble:
+            preds.append(pd.Series(mdl.predict(features), index=features.index))
+        return pd.concat(preds, axis=1).mean(axis=1)
 
-    logging.info("generating predictions")
-    predictions = model.predict(predict_data[feature_cols])
-    predictions = pd.DataFrame(
-        predictions, columns=["prediction"], index=predict_data.index
-    )
-    return predictions
+    if hasattr(model, "predict"):
+        feature_cols = _maybe_extract_features(model) or _default_feature_cols(live_universe)
+        df = live_universe.copy()
+        for col in feature_cols:
+            if col not in df.columns:
+                df[col] = 0.0
+        features = df[feature_cols].astype(np.float32, copy=False)
+        preds = model.predict(features)
+        return pd.Series(preds, index=features.index)
+
+    if callable(model):
+        output = model(live_universe)
+        if isinstance(output, pd.DataFrame):
+            if "signal" in output.columns:
+                return output["signal"].copy()
+            if "prediction" in output.columns:
+                return output["prediction"].copy()
+            if output.shape[1] == 1:
+                return output.iloc[:, 0].copy()
+        if isinstance(output, pd.Series):
+            return output.copy()
+        return pd.Series(output, index=live_universe.index)
+
+    raise TypeError("Unsupported model type for prediction")
 
 
-def submit(predictions, predict_output_path="predictions.csv", model_id=None):
-    logging.info("writing predictions to file and submitting")
-    include_index = predictions.index.name is not None
-    predictions.to_csv(predict_output_path, index=include_index)
-    print(predictions)
-    napi.upload_predictions(
-        predict_output_path, model_id=model_id, tournament=TOURNAMENT
-    )
+def _fallback_predictions(live_universe: pd.DataFrame) -> pd.Series:
+    ticker_col = _resolve_ticker_col(live_universe)
+    if not ticker_col:
+        raise RuntimeError("No ticker column found for fallback predictions.")
+    tickers = live_universe[ticker_col].astype(str)
+    dates = None
+    if "date" in live_universe.columns:
+        dates = live_universe["date"].astype(str)
+    seeds = []
+    for i, t in enumerate(tickers):
+        base = f"{t}|{dates.iloc[i] if dates is not None else i}"
+        digest = hashlib.md5(base.encode("utf-8")).hexdigest()
+        seeds.append(int(digest[:8], 16))
+    series = pd.Series(seeds, index=live_universe.index, dtype="float64")
+    return _rank_uniform(series)
+
+
+def _resolve_ticker_col(live_universe: pd.DataFrame) -> str | None:
+    override = os.getenv("NUMERAI_TICKER_COL")
+    candidates = [override, "numerai_ticker", "ticker", "symbol"]
+    for c in candidates:
+        if c and c in live_universe.columns:
+            return c
+    return None
+
+
+def main() -> None:
+    logging.info("Downloading live signals universe")
+    candidates: List[str] = []
+    if LIVE_DATASET:
+        candidates.append(LIVE_DATASET)
+    if LIVE_FILENAME:
+        if "/" in LIVE_FILENAME:
+            candidates.append(LIVE_FILENAME)
+        else:
+            candidates.append(f"{DATA_VERSION}/{LIVE_FILENAME}")
+    else:
+        candidates.extend(
+            [
+                f"{DATA_VERSION}/live.parquet",
+                "signals/v2.1/live.parquet",
+                "signals/v2.0/live.parquet",
+            ]
+        )
+    dataset_used = _download_first_available(candidates)
+    live_universe = pd.read_parquet(dataset_used)
+
+    model = _safe_load_model(MODEL_PATH)
+    if model is not None:
+        model, explicit_cols = _unwrap_model_and_features(model)
+        if explicit_cols:
+            for col in explicit_cols:
+                if col not in live_universe.columns:
+                    live_universe[col] = 0.0
+        preds = _predict_with_model(model, live_universe)
+    else:
+        logging.warning("No model loaded, using fallback predictions.")
+        preds = _fallback_predictions(live_universe)
+
+    if RANK_UNIFORM:
+        preds = _rank_uniform(preds)
+
+    ticker_col = _resolve_ticker_col(live_universe)
+    if not ticker_col:
+        raise RuntimeError("No ticker column found (expected numerai_ticker/ticker/symbol).")
+    tickers = live_universe[ticker_col].astype(str)
+    predictions = pd.DataFrame({"numerai_ticker": tickers.values, "signal": preds.values})
+
+    logging.info("Writing predictions")
+    predictions.to_csv(PREDICTIONS_PATH, index=False)
+    if SKIP_UPLOAD:
+        logging.info("Skipping upload (NUMERAI_SKIP_UPLOAD=1)")
+        return
+    logging.info("Submitting predictions")
+    sapi.upload_predictions(PREDICTIONS_PATH, model_id=MODEL_ID)
 
 
 if __name__ == "__main__":
-    trained_model = train(napi, MODEL_ID)
-    predictions = predict(napi, trained_model)
-    submit(predictions, model_id=MODEL_ID)
+    main()
