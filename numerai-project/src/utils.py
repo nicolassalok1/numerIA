@@ -15,11 +15,29 @@ import yaml
 
 TARGET_CANDIDATES = [
     "target",
+    "target_20d",
+    "target_4d",
+    "target_5d",
+    "target_10d",
+    "target_20",
+    "target_30",
     "target_kazutsugi",
     "target_cyrus_v4",
     "target_nomi",
     "target_jericho",
 ]
+
+META_COLUMNS = {
+    "era",
+    "date",
+    "symbol",
+    "id",
+    "prediction_id",
+    "row_id",
+    "tournament_id",
+    "target",
+    "prediction",
+}
 
 # Keep alias pairs in sync to avoid LightGBM noise when both names are present
 LIGHTGBM_ALIAS_GROUPS = [
@@ -179,15 +197,52 @@ def get_feature_columns(df: pd.DataFrame, prefix: str = "feature") -> List[str]:
 
 def find_target_column(columns: Iterable[str]) -> str | None:
     """Find the first known target column name in a list."""
+    columns_list = list(columns)
     for candidate in TARGET_CANDIDATES:
         if candidate in columns:
             return candidate
+    target_like = [c for c in columns_list if str(c).startswith("target")]
+    if target_like:
+        for preferred in ("target", "target_20d", "target_20", "target_4d", "target_5d", "target_10d"):
+            if preferred in target_like:
+                return preferred
+        return sorted(target_like)[0]
     return None
 
 
 def detect_target(df: pd.DataFrame) -> str:
     """Detect a target column name from common Numerai targets."""
     return find_target_column(df.columns) or "target"
+
+
+def infer_feature_columns(
+    df: pd.DataFrame,
+    prefix: str = "feature",
+    *,
+    target_col: str | None = None,
+    extra_exclude: Iterable[str] | None = None,
+) -> List[str]:
+    """Infer feature columns from dataframe, with prefix fallback to numeric columns."""
+    prefix = str(prefix or "").strip()
+    if prefix:
+        feature_cols = [c for c in df.columns if c.startswith(prefix)]
+        if feature_cols:
+            return feature_cols
+
+    exclude = set(META_COLUMNS)
+    if target_col:
+        exclude.add(target_col)
+    if extra_exclude:
+        exclude.update(extra_exclude)
+
+    numeric_cols = [
+        c for c in df.columns
+        if c not in exclude and pd.api.types.is_numeric_dtype(df[c])
+    ]
+    if numeric_cols:
+        return numeric_cols
+
+    return [c for c in df.columns if c not in exclude]
 
 
 def dummy_dataset(n_rows: int = 100, n_features: int = 3, prefix: str = "feature") -> Tuple[pd.DataFrame, pd.Series]:
