@@ -9,6 +9,7 @@ from typing import Any, List, Sequence
 
 import joblib
 import numerapi
+import requests
 import numpy as np
 import pandas as pd
 
@@ -64,14 +65,14 @@ def _download_first_available(datasets: Sequence[str]) -> str:
             continue
         try:
             logging.info("Attempting download: %s", dataset)
-            return sapi.download_dataset(dataset)
+            return _download_dataset(dataset)
         except Exception as exc:
             msg = f"{dataset}: {exc}"
             errors.append(msg)
             logging.warning("Failed to download %s: %s", dataset, exc)
     # Fallback: query available datasets and pick a live.parquet
     try:
-        available = sapi.list_datasets()
+        available = _list_datasets()
         live_candidates = [d for d in available if d.endswith("/live.parquet") or d.endswith("live.parquet")]
         if live_candidates:
             # Prefer v2.1, then v2.0, then first match
@@ -82,7 +83,7 @@ def _download_first_available(datasets: Sequence[str]) -> str:
                     break
             chosen = preferred or live_candidates[0]
             logging.info("Fallback dataset selected: %s", chosen)
-            return sapi.download_dataset(chosen)
+            return _download_dataset(chosen)
     except Exception as exc:
         logging.warning("Fallback list_datasets failed: %s", exc)
         errors.append(f"list_datasets: {exc}")
@@ -90,6 +91,46 @@ def _download_first_available(datasets: Sequence[str]) -> str:
         "Failed to download any live dataset. Check NUMERAI_SIGNALS_LIVE_DATASET. "
         + " | ".join(errors[-5:])
     )
+
+
+def _list_datasets() -> List[str]:
+    if hasattr(sapi, "list_datasets"):
+        return sapi.list_datasets()
+    query = """
+    query ($round: Int, $tournament: Int) {
+        listDatasets(round: $round, tournament: $tournament)
+    }
+    """
+    args = {"round": None, "tournament": TOURNAMENT}
+    data = sapi.raw_query(query, args)["data"]["listDatasets"]
+    return data or []
+
+
+def _download_dataset(filename: str, dest_path: str | None = None) -> str:
+    if hasattr(sapi, "download_dataset"):
+        return sapi.download_dataset(filename, dest_path)
+    if dest_path is None:
+        dest_path = filename
+    # Ensure target directory exists
+    dest_path = str(dest_path)
+    dest_dir = os.path.dirname(dest_path)
+    if dest_dir:
+        os.makedirs(dest_dir, exist_ok=True)
+    query = """
+    query ($filename: String!, $round: Int, $tournament: Int) {
+        dataset(filename: $filename, round: $round, tournament: $tournament)
+    }
+    """
+    args = {"filename": filename, "round": None, "tournament": TOURNAMENT}
+    dataset_url = sapi.raw_query(query, args)["data"]["dataset"]
+    # Stream download to file
+    with requests.get(dataset_url, stream=True, timeout=600) as resp:
+        resp.raise_for_status()
+        with open(dest_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+    return dest_path
 
 
 def _maybe_extract_features(model: Any) -> List[str] | None:
