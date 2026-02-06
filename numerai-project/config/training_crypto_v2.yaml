@@ -1,0 +1,28 @@
+general:
+  row_limit: null          # null = utilise tout le dataset
+  n_folds: 5               # CV par blocs temporels
+  holdout_eras: 30         # ajuste si peu de dates
+  early_stopping_rounds: 200
+  shuffle: true
+  stratify: false
+
+files:
+  train: "data/crypto_v2/r1198__crypto_v2_0_train.parquet"
+  tournament: "data/crypto_v2/r1198__crypto_v2_0_live.parquet"
+  submission: "submission_crypto_v2.csv"
+
+# Si le dataset crypto contient plusieurs targets (ex: target_20d), décommente:
+# targets:
+#   column: "target_20d"
+
+seed: 42
+
+models:
+  lgb_ensemble_seeds: [42, 43, 44, 45, 46]
+  include_ridge: false
+  include_mlp: false
+  aggregator: mean
+
+prediction:
+  rank: true
+  rank_by_era: true

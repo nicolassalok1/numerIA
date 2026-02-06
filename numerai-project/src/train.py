@@ -216,8 +216,24 @@ def prepare_training_frame(training_cfg: Dict[str, Any], features_cfg: Dict[str,
         train_path = PROJECT_ROOT / train_path
     schema_cols = utils.parquet_columns(train_path)
     feature_cols = [c for c in schema_cols if c.startswith(feature_prefix)] if schema_cols else []
-    target_col = utils.find_target_column(schema_cols) if schema_cols else None
-    columns_to_read = ["era"] + feature_cols + ([target_col] if target_col else [])
+    target_override = (
+        (training_cfg.get("targets", {}) or {}).get("column")
+        or training_cfg.get("target_col")
+        or training_cfg.get("target")
+    )
+    target_col = None
+    if target_override and (not schema_cols or target_override in schema_cols):
+        target_col = str(target_override)
+    elif schema_cols:
+        target_col = utils.find_target_column(schema_cols)
+
+    columns_to_read = None
+    if feature_cols:
+        columns_to_read = ["era"] + feature_cols
+        if target_col:
+            columns_to_read.append(target_col)
+        if schema_cols and "date" in schema_cols:
+            columns_to_read.append("date")
     df = utils.safe_read_parquet(train_path, columns=columns_to_read or None)
 
     if df.empty:
@@ -228,8 +244,14 @@ def prepare_training_frame(training_cfg: Dict[str, Any], features_cfg: Dict[str,
         dummy["target"] = y.values
         return dummy, feature_prefix, "target", utils.get_feature_columns(dummy, feature_prefix)
 
+    if target_override and target_override in df.columns:
+        target_col = str(target_override)
+    if not target_col:
+        target_col = utils.find_target_column(df.columns)
+
+    feature_cols = [c for c in feature_cols if c in df.columns]
     if not feature_cols:
-        feature_cols = utils.get_feature_columns(df, feature_prefix)
+        feature_cols = utils.infer_feature_columns(df, prefix=feature_prefix, target_col=target_col)
     if not feature_cols:
         utils.log("No feature columns found; using dummy dataset.")
         X, y = utils.dummy_dataset(prefix=feature_prefix)
@@ -243,6 +265,8 @@ def prepare_training_frame(training_cfg: Dict[str, Any], features_cfg: Dict[str,
 
     if not target_col:
         target_col = utils.detect_target(df)
+    if "era" not in df.columns and "date" in df.columns:
+        df["era"] = df["date"].astype(str)
     if "era" not in df.columns:
         df["era"] = "0000"
     # Keep eras time-ordered (required for era-based CV)
