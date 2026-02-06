@@ -17,7 +17,7 @@ TOURNAMENT = 8
 DATA_VERSION = os.getenv("NUMERAI_CLASSIC_VERSION", "v5.2").strip() or "v5.2"
 LIVE_DATASET = os.getenv("NUMERAI_CLASSIC_LIVE_DATASET", "").strip()
 LIVE_FILENAME = os.getenv("NUMERAI_CLASSIC_LIVE_FILE", "").strip()
-MODEL_PATH = os.getenv("MODEL_PATH", "salok1.pkl")
+MODEL_PATH = os.getenv("MODEL_PATH", "salok1_classic.pkl")
 PREDICTIONS_PATH = os.getenv("PREDICTIONS_PATH", "predictions.csv")
 RANK_UNIFORM = os.getenv("NUMERAI_RANK_UNIFORM", "1").lower() not in {"0", "false", "no"}
 SKIP_UPLOAD = os.getenv("NUMERAI_SKIP_UPLOAD", "").lower() in {"1", "true", "yes", "y", "on"}
@@ -181,10 +181,17 @@ def _predict_with_model(model: Any, live_universe: pd.DataFrame) -> pd.Series:
     raise TypeError("Unsupported model type for prediction")
 
 
-def _resolve_id_col(live_universe: pd.DataFrame) -> str | None:
+def _resolve_id_series(live_universe: pd.DataFrame) -> pd.Series | None:
     for col in ("id", "prediction_id", "row_id", "tournament_id"):
         if col in live_universe.columns:
-            return col
+            return live_universe[col]
+    idx_name = live_universe.index.name
+    if idx_name in {"id", "prediction_id", "row_id", "tournament_id"}:
+        return live_universe.index.to_series()
+    if isinstance(live_universe.index, pd.MultiIndex):
+        for name in live_universe.index.names:
+            if name in {"id", "prediction_id", "row_id", "tournament_id"}:
+                return live_universe.index.get_level_values(name).to_series()
     return None
 
 
@@ -226,10 +233,10 @@ def main() -> None:
     if RANK_UNIFORM:
         preds = _rank_uniform(preds)
 
-    id_col = _resolve_id_col(live_universe)
-    if not id_col:
+    ids = _resolve_id_series(live_universe)
+    if ids is None:
         raise RuntimeError("No id column found (expected id/prediction_id/row_id).")
-    predictions = pd.DataFrame({"id": live_universe[id_col].values, "prediction": preds.values})
+    predictions = pd.DataFrame({"id": ids.values, "prediction": preds.values})
 
     logging.info("Writing predictions")
     predictions.to_csv(PREDICTIONS_PATH, index=False)

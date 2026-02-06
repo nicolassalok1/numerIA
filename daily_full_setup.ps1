@@ -17,8 +17,8 @@ $env:PYTHONIOENCODING = "utf-8"
 $env:HTTP_PROXY=""; $env:HTTPS_PROXY=""; $env:ALL_PROXY=""
 
 # Model names + IDs
-$ClassicModel   = "salok1"
-$ClassicModelId = "ecb01105-5985-43bb-b76e-445d94c22928"
+$ClassicModel   = "salok1_classic"
+$ClassicModelId = "c3a95af2-14f3-44a8-8ec7-d5d4fca28a93"
 $SignalsModel   = "salok1_signals"
 $SignalsModelId = "d8c538bd-ddfa-4456-8506-ab0cc8ef1c55"
 $CryptoModel    = "salok1"
@@ -82,7 +82,7 @@ function Ensure-NodeConfig {
 
 if (-not $SkipConfig) {
     Ensure-NodeConfig -ModelName $ClassicModel -ModelId $ClassicModelId -Tournament 8 -NodeDir $ClassicNodeDir
-    Ensure-NodeConfig -ModelName $SignalsModel -ModelId $SignalsModelId -Tournament 11 -NodeDir $SignalsNodeDir -ExampleEnv "signals-python3"
+    Ensure-NodeConfig -ModelName $SignalsModel -ModelId $SignalsModelId -Tournament 11 -NodeDir $SignalsNodeDir
     Ensure-NodeConfig -ModelName $CryptoModel -ModelId $CryptoModelId -Tournament 12 -NodeDir $CryptoNodeDir
 }
 

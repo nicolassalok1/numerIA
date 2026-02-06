@@ -10,7 +10,7 @@ $env:PYTHONIOENCODING = "utf-8"
 $env:HTTP_PROXY=""; $env:HTTPS_PROXY=""; $env:ALL_PROXY=""
 
 # Model names (Numerai dashboard)
-$ClassicModel = "salok1"
+$ClassicModel = "salok1_classic"
 $SignalsModel = "salok1_signals"
 $CryptoModel  = "salok1"
 

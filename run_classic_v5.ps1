@@ -147,7 +147,7 @@ try {
     & python "src/model_upload.py" `
         --models-dir "models" `
         --training-config $trainingCfgPath `
-        --output "salok1.pkl"
+        --output "salok1_classic.pkl"
 }
 catch {
     Write-Error "Model upload pickle build failed: $($_.Exception.Message)"
@@ -156,8 +156,8 @@ catch {
 
 $classicNodeDir = Join-Path $RootDir "classic-node"
 if (Test-Path $classicNodeDir) {
-    Copy-Item -Path (Join-Path $RootDir "salok1.pkl") -Destination (Join-Path $classicNodeDir "salok1.pkl") -Force
-    Write-Host "Copied salok1.pkl to $classicNodeDir"
+    Copy-Item -Path (Join-Path $RootDir "salok1_classic.pkl") -Destination (Join-Path $classicNodeDir "salok1_classic.pkl") -Force
+    Write-Host "Copied salok1_classic.pkl to $classicNodeDir"
 }
 else {
     Write-Warning "classic-node not found at $classicNodeDir. Copy manually."
