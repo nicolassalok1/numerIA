@@ -223,7 +223,20 @@ def main() -> None:
         logging.info("Skipping upload (NUMERAI_SKIP_UPLOAD=1)")
         return
     logging.info("Submitting predictions")
-    napi.upload_predictions(PREDICTIONS_PATH, model_id=MODEL_ID, tournament=TOURNAMENT)
+    # Prefer CryptoAPI if available; fall back to NumerAPI
+    try:
+        crypto_api_cls = getattr(numerapi, "CryptoAPI", None)
+        if crypto_api_cls is not None:
+            crypto_api = crypto_api_cls(
+                public_id=os.getenv("NUMERAI_PUBLIC_ID", DEFAULT_PUBLIC_ID),
+                secret_key=os.getenv("NUMERAI_SECRET_KEY", DEFAULT_SECRET_KEY),
+            )
+            crypto_api.upload_predictions(PREDICTIONS_PATH, model_id=MODEL_ID)
+            return
+    except Exception as exc:
+        logging.warning("CryptoAPI upload failed, falling back to NumerAPI: %s", exc)
+
+    napi.upload_predictions(PREDICTIONS_PATH, model_id=MODEL_ID)
 
 
 if __name__ == "__main__":
