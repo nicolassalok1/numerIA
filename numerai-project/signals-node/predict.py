@@ -169,6 +169,14 @@ def _maybe_extract_features(model: Any) -> List[str] | None:
     return None
 
 
+def _ensure_columns(df: pd.DataFrame, columns: Sequence[str]) -> pd.DataFrame:
+    missing = [c for c in columns if c not in df.columns]
+    if not missing:
+        return df
+    filler = pd.DataFrame(0.0, index=df.index, columns=missing)
+    return pd.concat([df, filler], axis=1)
+
+
 def _unwrap_model_and_features(model: Any) -> tuple[Any, List[str] | None]:
     if isinstance(model, dict) and "model" in model:
         return model.get("model"), _maybe_extract_features(model)
@@ -213,10 +221,7 @@ def _predict_with_model(model: Any, live_universe: pd.DataFrame) -> pd.Series:
     ensemble = _iter_ensemble(model)
     if ensemble:
         feature_cols = _maybe_extract_features(ensemble[0]) or _default_feature_cols(live_universe)
-        df = live_universe.copy()
-        for col in feature_cols:
-            if col not in df.columns:
-                df[col] = 0.0
+        df = _ensure_columns(live_universe.copy(), feature_cols)
         features = df[feature_cols].astype(np.float32, copy=False)
         preds = []
         for mdl in ensemble:
@@ -225,10 +230,7 @@ def _predict_with_model(model: Any, live_universe: pd.DataFrame) -> pd.Series:
 
     if hasattr(model, "predict"):
         feature_cols = _maybe_extract_features(model) or _default_feature_cols(live_universe)
-        df = live_universe.copy()
-        for col in feature_cols:
-            if col not in df.columns:
-                df[col] = 0.0
+        df = _ensure_columns(live_universe.copy(), feature_cols)
         features = df[feature_cols].astype(np.float32, copy=False)
         preds = model.predict(features)
         return pd.Series(preds, index=features.index)
@@ -300,9 +302,7 @@ def main() -> None:
     if model is not None:
         model, explicit_cols = _unwrap_model_and_features(model)
         if explicit_cols:
-            for col in explicit_cols:
-                if col not in live_universe.columns:
-                    live_universe[col] = 0.0
+            live_universe = _ensure_columns(live_universe, explicit_cols)
         preds = _predict_with_model(model, live_universe)
     else:
         logging.warning("No model loaded, using fallback predictions.")
