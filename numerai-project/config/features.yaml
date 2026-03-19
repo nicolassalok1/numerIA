@@ -6,3 +6,12 @@ features:
   min_corr_abs: 0.0          # pas de filtre par corrélation
   max_na_ratio: 0.10         # trop de NA -> dehors
   standardize: true          # je standardise pour que MLP/LGBM restent stables
+
+# Feature engineering: meta-features computed from raw features
+feature_engineering:
+  enabled: true              # active/désactive le feature engineering
+  row_stats: true            # mean, std, min, max, range, bin counts par ligne
+  group_stats: true          # mean, std par groupe de features (approxime les groupes Numerai)
+  interactions: true         # différences entre features espacées
+  n_groups: 8                # nombre de groupes de features
+  n_interactions: 10         # nombre de paires d'interactions

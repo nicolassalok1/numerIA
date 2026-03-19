@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''src/model_xgb.py''\\).read\\(\\)\\); print\\(''model_xgb.py: OK''\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''src/build_upload_pkls.py''\\).read\\(\\)\\); print\\(''build_upload_pkls.py: OK''\\)\")"
+    ]
+  }
+}

@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from src import model_lgb, model_mlp, model_ridge, stacker, utils  # noqa: E402
+from src import feature_eng, model_lgb, model_mlp, model_ridge, model_xgb, stacker, utils  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -357,6 +357,7 @@ def resolve_model_specs(
         utils.log(f"Multi-target: capped seeds to {mt_seeds_cap} per target (diversity from targets)")
 
     include_lgb = models_cfg.get("include_lgb", True)
+    include_xgb = models_cfg.get("include_xgb", False)
     include_ridge = models_cfg.get("include_ridge")
     include_mlp = models_cfg.get("include_mlp")
 
@@ -376,12 +377,21 @@ def resolve_model_specs(
         for s in lgb_seeds:
             seeded_params = dict(base_lgb_params)
             seeded_params["seed"] = int(s)
-            # Optional: keep RNG streams independent when using stochastic params
             seeded_params["data_random_seed"] = int(s)
             seeded_params["feature_fraction_seed"] = int(s)
             seeded_params["bagging_seed"] = int(s)
             name = "lgb" if len(lgb_seeds) == 1 else f"lgb_s{int(s)}"
             specs.append((name, lambda p=seeded_params: model_lgb.LightGBMModel(p), "lgb"))
+
+    if include_xgb:
+        # XGBoost uses same seed list but different tree-building (level-wise vs leaf-wise)
+        xgb_seeds = lgb_seeds[:1]  # 1 XGB seed is enough for diversity
+        base_xgb_params = dict(params_cfg.get("lightgbm", {}) or {})  # reuse same hyperparams
+        for s in xgb_seeds:
+            seeded_params = dict(base_xgb_params)
+            seeded_params["seed"] = int(s)
+            name = f"xgb_s{int(s)}"
+            specs.append((name, lambda p=seeded_params: model_xgb.XGBoostModel(p), "xgb"))
 
     if include_ridge:
         specs.append(("ridge", lambda: model_ridge.RidgeModel(params_cfg.get("ridge", {})), "ridge"))
@@ -432,9 +442,21 @@ def train_base_models(
     era_counts = era_series.value_counts()
     era_weights = (1.0 / era_counts).rename("weight")
     sample_weights = era_series.map(era_weights).astype(np.float32)
-    # Normalize so weights sum to len(df_train) (keeps LGB loss scale unchanged)
+
+    # Recency weighting: boost recent eras with exponential decay
+    # sorted_eras[0] = oldest, sorted_eras[-1] = newest
+    sorted_eras = sorted(unique_eras)
+    era_to_rank = {era: i for i, era in enumerate(sorted_eras)}
+    n_eras = len(sorted_eras)
+    # Half-life: eras older than half the dataset get ~50% weight of the newest
+    half_life = max(1, n_eras // 2)
+    decay = np.log(2) / half_life
+    era_recency = era_series.map(lambda e: np.exp(decay * era_to_rank.get(e, 0)))
+    sample_weights = sample_weights * era_recency.astype(np.float32)
+
+    # Normalize so weights sum to len(df_train) (keeps loss scale unchanged)
     sample_weights = sample_weights * (len(df_train) / sample_weights.sum())
-    utils.log(f"Era-weighting: {len(era_counts)} eras, weight range [{sample_weights.min():.4f}, {sample_weights.max():.4f}]")
+    utils.log(f"Era-weighting + recency: {len(era_counts)} eras, half_life={half_life}, weight range [{sample_weights.min():.4f}, {sample_weights.max():.4f}]")
 
     oof_preds = pd.DataFrame(index=range(len(X)))
     fitted_models: Dict[str, Any] = {}
@@ -460,14 +482,19 @@ def train_base_models(
                 val_end_row = int(era_ends[val_era_end])
 
                 mdl = builder()
-                if kind == "lgb":
+                is_tree_model = kind in ("lgb", "xgb")
+                if is_tree_model:
+                    train_kwargs: Dict[str, Any] = {
+                        "eval_set": (X.iloc[val_start_row:val_end_row], y.iloc[val_start_row:val_end_row]),
+                        "early_stopping_rounds": early_stopping_rounds,
+                        "sample_weight": sample_weights.iloc[:train_end_row],
+                    }
+                    if kind == "lgb":
+                        train_kwargs["eval_metric"] = lgb_eval_metric
                     mdl.train(
                         X.iloc[:train_end_row],
                         y.iloc[:train_end_row],
-                        eval_set=(X.iloc[val_start_row:val_end_row], y.iloc[val_start_row:val_end_row]),
-                        eval_metric=lgb_eval_metric,
-                        early_stopping_rounds=early_stopping_rounds,
-                        sample_weight=sample_weights.iloc[:train_end_row],
+                        **train_kwargs,
                     )
                     best_it = getattr(mdl, "best_iteration_", None)
                     if isinstance(best_it, int) and best_it > 0:
@@ -479,7 +506,7 @@ def train_base_models(
                 bar.update(1, f"{name} fold {fold_i}/{len(folds)}")
         else:
             mdl = builder()
-            if kind == "lgb":
+            if kind in ("lgb", "xgb"):
                 mdl.train(X, y, sample_weight=sample_weights)
             else:
                 mdl.train(X, y)
@@ -489,11 +516,12 @@ def train_base_models(
         oof_preds[name] = fold_pred
 
         final_model = builder()
-        if kind == "lgb" and fold_best_iters:
+        is_tree_model = kind in ("lgb", "xgb")
+        if is_tree_model and fold_best_iters:
             stable_rounds = int(np.median(np.array(fold_best_iters, dtype=int)))
             final_model.train(X, y, num_boost_round=stable_rounds, sample_weight=sample_weights)
             diagnostics["models"][name] = {"stable_rounds": stable_rounds, "fold_best_iters": fold_best_iters}
-        elif kind == "lgb":
+        elif is_tree_model:
             final_model.train(X, y, sample_weight=sample_weights)
         else:
             final_model.train(X, y)
@@ -653,6 +681,32 @@ def main() -> None:
         df_holdout[feature_cols] = df_holdout[feature_cols].astype(np.float32, copy=False)
 
     del df
+
+    # Feature engineering: add meta-features (row stats, group stats, interactions)
+    fe_cfg = features_cfg.get("feature_engineering", {}) or {}
+    if fe_cfg.get("enabled", True):
+        raw_feature_cols = list(feature_cols)  # preserve original features list
+        eng_cols_train = feature_eng.engineer_features(
+            df_train, list(feature_cols),
+            row_stats=fe_cfg.get("row_stats", True),
+            group_stats=fe_cfg.get("group_stats", True),
+            interactions=fe_cfg.get("interactions", True),
+            n_groups=int(fe_cfg.get("n_groups", 8) or 8),
+            n_interactions=int(fe_cfg.get("n_interactions", 10) or 10),
+        )
+        if eng_cols_train:
+            feature_cols = list(feature_cols) + eng_cols_train
+            utils.log(f"Feature engineering: added {len(eng_cols_train)} meta-features -> {len(feature_cols)} total features")
+            # Apply same engineering to holdout
+            if not df_holdout.empty:
+                feature_eng.engineer_features(
+                    df_holdout, raw_feature_cols,
+                    row_stats=fe_cfg.get("row_stats", True),
+                    group_stats=fe_cfg.get("group_stats", True),
+                    interactions=fe_cfg.get("interactions", True),
+                    n_groups=int(fe_cfg.get("n_groups", 8) or 8),
+                    n_interactions=int(fe_cfg.get("n_interactions", 10) or 10),
+                )
 
     utils.save_json(
         {

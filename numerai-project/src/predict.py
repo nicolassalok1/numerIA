@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from src import model_lgb, model_mlp, model_ridge, stacker, utils  # noqa: E402
+from src import feature_eng, model_lgb, model_mlp, model_ridge, model_xgb, stacker, utils  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,6 +51,15 @@ def builder_for_model(name: str, params: Dict[str, Any]) -> Any:
         return model_ridge.RidgeModel(params.get("ridge", {}))
     if name == "mlp":
         return model_mlp.MLPModel(params.get("mlp", {}))
+    if name.startswith("xgb"):
+        xgb_params = dict(params.get("lightgbm", {}) or {})
+        if name.startswith("xgb_s"):
+            try:
+                seed = int(name.split("xgb_s", 1)[1])
+                xgb_params["seed"] = seed
+            except Exception:
+                pass
+        return model_xgb.XGBoostModel(xgb_params)
     if name.startswith("lgb"):
         lgb_params = dict(params.get("lightgbm", {}) or {})
         if name.startswith("lgb_s"):
@@ -195,6 +204,30 @@ def predict_single_target(
 def predict(models_dir: Path, training_cfg: Dict[str, Any], params_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) -> pd.DataFrame:
     """Generate predictions and save submission file (supports multi-target)."""
     features_df, ids, eras, tournament_path = load_features(models_dir, training_cfg, features_cfg)
+
+    # Apply feature engineering if the persisted feature list contains engineered columns
+    persisted_path = models_dir / "feature_columns.json"
+    if persisted_path.exists():
+        persisted_data = utils.load_json(persisted_path)
+        persisted_cols = persisted_data.get("feature_cols", [])
+        eng_cols_needed = [c for c in persisted_cols if c.startswith(feature_eng.PREFIX)]
+        if eng_cols_needed:
+            raw_cols = [c for c in persisted_cols if not c.startswith(feature_eng.PREFIX)]
+            fe_cfg = (features_cfg.get("feature_engineering", {}) or {})
+            feature_eng.engineer_features(
+                features_df, raw_cols,
+                row_stats=fe_cfg.get("row_stats", True),
+                group_stats=fe_cfg.get("group_stats", True),
+                interactions=fe_cfg.get("interactions", True),
+                n_groups=int(fe_cfg.get("n_groups", 8) or 8),
+                n_interactions=int(fe_cfg.get("n_interactions", 10) or 10),
+            )
+            # Ensure all expected columns exist
+            for col in eng_cols_needed:
+                if col not in features_df.columns:
+                    features_df[col] = 0.0
+            features_df = features_df[persisted_cols]
+            utils.log(f"Feature engineering: applied {len(eng_cols_needed)} meta-features for prediction")
 
     spec = load_model_spec(models_dir)
     is_multi_target = spec.get("multi_target", False)

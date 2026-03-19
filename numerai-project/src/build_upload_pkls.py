@@ -86,6 +86,27 @@ def neutralize(
     return pd.DataFrame(neutral, index=df.index, columns=df.columns)
 
 
+ENG_PREFIX = "feature_eng_"
+
+
+def _apply_feature_engineering(df: pd.DataFrame, feature_cols: List[str]) -> pd.DataFrame:
+    """Apply feature engineering to a live features DataFrame if needed."""
+    eng_cols = [c for c in feature_cols if c.startswith(ENG_PREFIX)]
+    if not eng_cols:
+        return df
+    raw_cols = [c for c in feature_cols if not c.startswith(ENG_PREFIX)]
+    try:
+        from src.feature_eng import engineer_features
+        engineer_features(df, raw_cols)
+    except Exception:
+        # Fallback: fill missing engineered columns with 0
+        pass
+    for col in eng_cols:
+        if col not in df.columns:
+            df[col] = 0.0
+    return df
+
+
 class BasePredictor:
     def __init__(
         self,
@@ -108,6 +129,8 @@ class BasePredictor:
 
     def _predict_base(self, live_features: pd.DataFrame) -> pd.Series:
         df = live_features.copy()
+        # Apply feature engineering if model expects engineered features
+        df = _apply_feature_engineering(df, self.feature_cols)
         for col in self.feature_cols:
             if col not in df.columns:
                 df[col] = 0.0
