@@ -746,16 +746,31 @@ def main() -> None:
                 sharpe = 0.0
             target_sharpes[tgt] = max(0.0, sharpe)  # clip negative Sharpe to 0
 
+        # Filter targets by quality: remove those with Sharpe below threshold
+        min_sharpe = float(mt_cfg.get("min_target_sharpe", 0.0) or 0.0)
+        if min_sharpe > 0:
+            before_count = len(trained_targets)
+            good_targets = [t for t in trained_targets if target_sharpes.get(t, 0.0) >= min_sharpe]
+            dropped = [t for t in trained_targets if t not in good_targets]
+            if dropped:
+                utils.log(f"Target quality filter: dropped {len(dropped)} targets with Sharpe < {min_sharpe}: {dropped[:5]}{'...' if len(dropped) > 5 else ''}")
+            if good_targets:
+                trained_targets = good_targets
+            else:
+                utils.log(f"Warning: all targets below min_sharpe={min_sharpe}, keeping all")
+
         # Compute blend weights from Sharpe ratios
         blend_mode = str(mt_cfg.get("blend", "mean")).strip().lower()
         target_weights: Dict[str, float] = {}
         if blend_mode == "sharpe_weighted" and target_sharpes:
-            total_sharpe = sum(target_sharpes.values())
+            # Only use trained_targets (after quality filter)
+            filtered_sharpes = {t: target_sharpes.get(t, 0.0) for t in trained_targets}
+            total_sharpe = sum(filtered_sharpes.values())
             if total_sharpe > 0:
-                target_weights = {t: s / total_sharpe for t, s in target_sharpes.items()}
-                utils.log(f"Sharpe-weighted blend: top 5 weights = {sorted(target_weights.items(), key=lambda x: -x[1])[:5]}")
+                target_weights = {t: s / total_sharpe for t, s in filtered_sharpes.items()}
+                top_5 = sorted(target_weights.items(), key=lambda x: -x[1])[:5]
+                utils.log(f"Sharpe-weighted blend: {len(trained_targets)} targets, top 5 = {[(t, f'{w:.4f}') for t, w in top_5]}")
             else:
-                # All Sharpes <= 0, fall back to equal weights
                 target_weights = {t: 1.0 / len(trained_targets) for t in trained_targets}
                 utils.log("All target Sharpes <= 0, falling back to equal weights")
         else:
@@ -778,7 +793,7 @@ def main() -> None:
             {"multi_target": True, "targets": trained_targets, "target_sharpes": target_sharpes, "diagnostics": all_diagnostics},
             models_dir / "metrics.json",
         )
-        utils.log(f"Multi-target training complete: {len(trained_targets)} targets trained.")
+        utils.log(f"Multi-target training complete: {len(trained_targets)} targets in final blend.")
 
     else:
         # --- Single-target mode (backward compatible) ---

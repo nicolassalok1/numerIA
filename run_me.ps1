@@ -270,6 +270,23 @@ catch {
 }
 
 ###############################################################################
+# 3.25) Diagnostics (optional, after prediction)
+###############################################################################
+if (-not $env:SKIP_DIAGNOSTICS) {
+    Write-Host ""
+    Write-Host "Running model diagnostics..."
+    try {
+        & python "src/diagnostics.py" `
+            --config $trainingCfgPath `
+            --params $paramsPath `
+            --features (Join-Path $RootDir $featuresCfgRel)
+    }
+    catch {
+        Write-Warning "Diagnostics failed (non-blocking): $($_.Exception.Message)"
+    }
+}
+
+###############################################################################
 # 3.5) Ensure submission file exists (fallback generation)
 ###############################################################################
 if (-not (Test-Path $submissionPath)) {
@@ -317,6 +334,12 @@ print("Upload:", resp)
 "@ | python -
 
 ###############################################################################
+Write-Host ""
 Write-Host "Summary:"
 Write-Host "  Free VRAM: $freeVramMb MB"
 Write-Host "  Params used: $paramsPath"
+Write-Host ""
+Write-Host "Useful commands:"
+Write-Host "  python src/diagnostics.py    # Run diagnostics on trained model"
+Write-Host "  python src/optimize.py       # Optimize hyperparams with Optuna (50 trials)"
+Write-Host "  SKIP_DIAGNOSTICS=1           # Skip diagnostics step in pipeline"

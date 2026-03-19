@@ -25,10 +25,11 @@ models:
 # Set to null or empty list to disable (single-target mode, uses auto-detected target).
 # Use "auto" to auto-detect all target columns from the dataset.
 multi_target:
-  targets: "auto"          # "auto" = detect all target_* columns; or explicit list
-  max_targets: 20          # cap to avoid training hundreds of models
-  seeds_per_target: 2      # en multi-target, 2 seeds suffisent (diversité vient des targets)
-  blend: sharpe_weighted   # "mean" = equal weight, "sharpe_weighted" = weight by holdout Sharpe
+  targets: "auto"            # "auto" = detect all target_* columns; or explicit list
+  max_targets: 20            # cap to avoid training hundreds of models
+  seeds_per_target: 2        # en multi-target, 2 seeds suffisent (diversité vient des targets)
+  blend: sharpe_weighted     # "mean" = equal weight, "sharpe_weighted" = weight by holdout Sharpe
+  min_target_sharpe: 0.15    # drop targets with holdout Sharpe below this threshold
 
 prediction:
   rank: true
