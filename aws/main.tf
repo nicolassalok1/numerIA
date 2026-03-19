@@ -63,6 +63,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
   rule {
     id     = "cleanup-old-runs"
     status = "Enabled"
+    filter {}
     expiration {
       days = 90
     }
@@ -180,13 +181,13 @@ resource "aws_security_group" "numerai" {
 # EC2 Spot GPU Instance
 # =============================================================
 
-# Latest Deep Learning AMI (Amazon Linux 2, NVIDIA drivers pre-installed)
+# Latest Deep Learning Base AMI (Amazon Linux 2, NVIDIA drivers pre-installed)
 data "aws_ami" "deep_learning" {
   most_recent = true
   owners      = ["amazon"]
   filter {
     name   = "name"
-    values = ["Deep Learning AMI GPU PyTorch * (Amazon Linux 2) *"]
+    values = ["Deep Learning Proprietary Nvidia Driver AMI GPU PyTorch 2* (Amazon Linux 2) *"]
   }
   filter {
     name   = "state"

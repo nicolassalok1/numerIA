@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(aws logs:*)",
+      "Bash(MSYS_NO_PATHCONV=1 aws logs describe-log-groups --log-group-name-prefix \"/aws/lambda/numerai\" --region us-east-1 --output json)",
+      "Bash(aws lambda:*)",
+      "Bash(MSYS_NO_PATHCONV=1 aws lambda invoke --function-name numerai-start-pipeline --payload '{}' --cli-binary-format raw-in-base64-out --region us-east-1 /tmp/lambda-output.json)",
+      "Read(//tmp/**)",
+      "Bash(MSYS_NO_PATHCONV=1 aws lambda invoke --function-name numerai-start-pipeline --payload '{}' --cli-binary-format raw-in-base64-out --region us-east-1 lambda-output.json)",
+      "Bash(aws iam:*)",
+      "Bash(MSYS_NO_PATHCONV=1 aws lambda invoke --function-name numerai-start-pipeline --payload '{}' --cli-binary-format raw-in-base64-out --region us-east-1 lambda-output2.json)"
+    ]
+  }
+}

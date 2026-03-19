@@ -4,9 +4,9 @@
 aws_region = "us-east-1"
 
 # Tes credentials Numerai (depuis numer.ai -> Account -> API Keys)
-numerai_public_id  = "ton_public_id_ici"
-numerai_secret_key = "ton_secret_key_ici"
-numerai_model_id   = "ton_model_id_ici"
+numerai_public_id  = "NI3BO2EXVD66MXXRFWT626H7U2AY3H52"
+numerai_secret_key = "4LDL6GQUJSSDPIXOF565QE2VXVDBIUJVS43GHQJTOJUP3PZJ5ZLEVU67UTUZTGNV"
+numerai_model_id   = "569c3a24-2e30-4b26-8700-bba84b5283d3"
 
 # GPU instance type
 # g4dn.xlarge = T4 16GB ($0.16/hr spot) - bon rapport qualite/prix

@@ -1,21 +1,10 @@
-$ErrorActionPreference = "Stop"
-
-# =============================================================
-# Numerai AWS Deployment Script (PowerShell)
-#
-# Usage:
-#   .\deploy.ps1 setup     # First time: create AWS infra + build + push
-#   .\deploy.ps1 build     # Build and push Docker image only
-#   .\deploy.ps1 run       # Trigger a manual run now
-#   .\deploy.ps1 destroy   # Tear down all AWS resources
-#   .\deploy.ps1 logs      # Show latest pipeline logs
-# =============================================================
-
 param(
     [Parameter(Position=0)]
     [ValidateSet("setup", "build", "run", "destroy", "logs", "help")]
     [string]$Command = "help"
 )
+
+$ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Join-Path (Split-Path -Parent $ScriptDir) "numerai-project"
