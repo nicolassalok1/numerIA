@@ -1,0 +1,13 @@
+data/
+models/
+output/
+*.pkl
+submission.csv
+__pycache__/
+*.pyc
+.git/
+notebooks/
+*.ipynb
+docker-compose.yml
+.env
+keys_local.ps1

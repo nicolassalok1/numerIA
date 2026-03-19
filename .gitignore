@@ -35,6 +35,14 @@ keys_local.ps1
 numerai-project/keys_local.ps1
 numerai-project/scripts/keys_local.ps1
 
+# AWS / Terraform
+aws/terraform.tfvars
+aws/.terraform/
+aws/*.tfstate
+aws/*.tfstate.backup
+aws/lambda.zip
+aws/.terraform.lock.hcl
+
 # OS noise
 .DS_Store
 Thumbs.db

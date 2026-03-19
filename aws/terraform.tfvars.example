@@ -1,0 +1,24 @@
+# Copie ce fichier vers terraform.tfvars et remplis tes valeurs
+# NE PAS COMMITTER terraform.tfvars (contient des secrets)
+
+aws_region = "us-east-1"
+
+# Tes credentials Numerai (depuis numer.ai -> Account -> API Keys)
+numerai_public_id  = "ton_public_id_ici"
+numerai_secret_key = "ton_secret_key_ici"
+numerai_model_id   = "ton_model_id_ici"
+
+# GPU instance type
+# g4dn.xlarge = T4 16GB ($0.16/hr spot) - bon rapport qualite/prix
+# g5.xlarge   = A10G 24GB ($0.30/hr spot) - plus rapide
+ec2_instance_type = "g4dn.xlarge"
+spot_max_price    = "0.25"
+
+# Planning: chaque samedi a 18h UTC (nouveau round Numerai)
+schedule_expression = "cron(0 18 ? * SAT *)"
+
+# Optuna: 0 = desactive (utilise les params fixes), 1 = active
+run_optuna = "0"
+
+# SSH key pour debug (optionnel, laisser vide sinon)
+ssh_key_name = ""

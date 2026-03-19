@@ -1,0 +1,21 @@
+services:
+  numerai-pipeline:
+    build: .
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NUMERAI_PUBLIC_ID=${NUMERAI_PUBLIC_ID}
+      - NUMERAI_SECRET_KEY=${NUMERAI_SECRET_KEY}
+      - NUMERAI_MODEL_ID=${NUMERAI_MODEL_ID}
+      - NUMERAI_PROGRESS=1
+      - RUN_OPTUNA=0
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
