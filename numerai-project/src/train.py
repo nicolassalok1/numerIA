@@ -176,27 +176,55 @@ def select_feature_columns(
     return selected, scores
 
 
-def build_time_series_folds(train_era_count: int, n_folds: int) -> List[Tuple[int, int]]:
-    """Return era-index ranges (start,end inclusive) for each validation fold.
+def build_time_series_folds(train_era_count: int, n_folds: int, embargo: int = 4) -> List[Tuple[int, int, int]]:
+    """Return era-index ranges for each validation fold with embargo gap.
 
     Uses contiguous blocks of eras, with an initial warmup block used only for training.
     For fold i: training eras = blocks[:i+1], validation eras = blocks[i+1].
+
+    Returns list of (train_end_era_idx, val_start_era_idx, val_end_era_idx) tuples.
+    The embargo gap between train_end and val_start prevents temporal leakage.
     """
     if train_era_count <= 1:
         return []
     n_folds = max(1, int(n_folds))
+    embargo = max(0, int(embargo))
     if train_era_count <= n_folds + 1:
-        # Ensure we still have a warmup block + at least 1 validation era.
         n_folds = max(1, train_era_count - 1)
     era_indices = np.arange(train_era_count)
     blocks: List[np.ndarray] = list(np.array_split(era_indices, n_folds + 1))
-    folds: List[Tuple[int, int]] = []
+    folds: List[Tuple[int, int, int]] = []
     for i in range(n_folds):
         val_block = blocks[i + 1]
         if val_block.size == 0:
             continue
-        folds.append((int(val_block[0]), int(val_block[-1])))
+        val_start = int(val_block[0])
+        val_end = int(val_block[-1])
+        # Train ends embargo eras before validation starts
+        train_end = max(0, val_start - embargo)
+        if train_end <= 0:
+            # Not enough eras for embargo, skip this fold
+            continue
+        folds.append((train_end, val_start, val_end))
     return folds
+
+
+def resolve_multi_targets(training_cfg: Dict[str, Any], schema_cols: List[str]) -> List[str]:
+    """Resolve multi-target list from config. Returns empty list if disabled."""
+    mt_cfg = training_cfg.get("multi_target", {}) or {}
+    targets_val = mt_cfg.get("targets")
+    if not targets_val:
+        return []
+    max_targets = int(mt_cfg.get("max_targets", 20) or 20)
+    if targets_val == "auto":
+        # Auto-detect all target columns from schema
+        all_targets = [c for c in schema_cols if c.startswith("target")]
+        if len(all_targets) > max_targets:
+            all_targets = all_targets[:max_targets]
+        return all_targets
+    if isinstance(targets_val, (list, tuple)):
+        return [str(t) for t in targets_val if str(t) in schema_cols][:max_targets]
+    return []
 
 
 def prepare_training_frame(training_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, str, str, List[str]]:
@@ -217,7 +245,12 @@ def prepare_training_frame(training_cfg: Dict[str, Any], features_cfg: Dict[str,
     schema_cols = utils.parquet_columns(train_path)
     feature_cols = [c for c in schema_cols if c.startswith(feature_prefix)] if schema_cols else []
     target_col = utils.find_target_column(schema_cols) if schema_cols else None
-    columns_to_read = ["era"] + feature_cols + ([target_col] if target_col else [])
+
+    # Resolve multi-target columns to load
+    multi_targets = resolve_multi_targets(training_cfg, schema_cols)
+    all_target_cols = list(set(([target_col] if target_col else []) + multi_targets))
+
+    columns_to_read = ["era"] + feature_cols + all_target_cols
     df = utils.safe_read_parquet(train_path, columns=columns_to_read or None)
 
     if df.empty:
@@ -257,6 +290,11 @@ def prepare_training_frame(training_cfg: Dict[str, Any], features_cfg: Dict[str,
     else:
         df[target_col] = df[target_col].astype(np.float32, copy=False)
 
+    # Cast multi-target columns
+    for tc in multi_targets:
+        if tc in df.columns and tc != target_col:
+            df[tc] = df[tc].astype(np.float32, copy=False)
+
     return df, feature_prefix, target_col, feature_cols
 
 
@@ -281,8 +319,18 @@ def parse_int_list(value: Any) -> List[int]:
     return []
 
 
-def resolve_model_specs(training_cfg: Dict[str, Any], params_cfg: Dict[str, Any], *, seed: int) -> Tuple[List[Tuple[str, Callable[[], Any], str]], str]:
-    """Resolve base models to train + aggregation method."""
+def resolve_model_specs(
+    training_cfg: Dict[str, Any],
+    params_cfg: Dict[str, Any],
+    *,
+    seed: int,
+    multi_target_active: bool = False,
+) -> Tuple[List[Tuple[str, Callable[[], Any], str]], str]:
+    """Resolve base models to train + aggregation method.
+
+    When multi_target_active=True, reduces seeds to 2 max since diversity
+    comes from training on different targets rather than different seeds.
+    """
     models_cfg = training_cfg.get("models", {}) or {}
 
     env_seeds = parse_int_list(os.environ.get("NUMERAI_LGB_SEEDS"))
@@ -301,6 +349,12 @@ def resolve_model_specs(training_cfg: Dict[str, Any], params_cfg: Dict[str, Any]
         seen.add(s)
         uniq_seeds.append(int(s))
     lgb_seeds = uniq_seeds
+
+    # In multi-target mode, diversity comes from targets -> reduce seeds to save time
+    mt_seeds_cap = int((training_cfg.get("multi_target", {}) or {}).get("seeds_per_target", 2) or 2)
+    if multi_target_active and len(lgb_seeds) > mt_seeds_cap:
+        lgb_seeds = lgb_seeds[:mt_seeds_cap]
+        utils.log(f"Multi-target: capped seeds to {mt_seeds_cap} per target (diversity from targets)")
 
     include_lgb = models_cfg.get("include_lgb", True)
     include_ridge = models_cfg.get("include_ridge")
@@ -358,6 +412,7 @@ def train_base_models(
     seed: int,
     early_stopping_rounds: int,
     models_dir: Path,
+    embargo: int = 4,
 ) -> Tuple[Dict[str, Any], pd.DataFrame, Dict[str, Any]]:
     """Train base models with era-based CV and return fitted models and OOF predictions."""
     X = df_train[list(feature_cols)]
@@ -365,14 +420,25 @@ def train_base_models(
     eras = df_train["era"].to_numpy()
 
     unique_eras, era_starts, era_ends = utils.era_slices(eras)
-    folds = build_time_series_folds(train_era_count=len(unique_eras), n_folds=n_folds)
+    folds = build_time_series_folds(train_era_count=len(unique_eras), n_folds=n_folds, embargo=embargo)
     if not folds:
         utils.log("Not enough eras for time-series CV; falling back to single fit.")
         folds = []
+    else:
+        utils.log(f"Time-series CV: {len(folds)} folds, embargo={embargo} eras")
+
+    # Era-weighting: each era contributes equally regardless of row count
+    era_series = df_train["era"]
+    era_counts = era_series.value_counts()
+    era_weights = (1.0 / era_counts).rename("weight")
+    sample_weights = era_series.map(era_weights).astype(np.float32)
+    # Normalize so weights sum to len(df_train) (keeps LGB loss scale unchanged)
+    sample_weights = sample_weights * (len(df_train) / sample_weights.sum())
+    utils.log(f"Era-weighting: {len(era_counts)} eras, weight range [{sample_weights.min():.4f}, {sample_weights.max():.4f}]")
 
     oof_preds = pd.DataFrame(index=range(len(X)))
     fitted_models: Dict[str, Any] = {}
-    diagnostics: Dict[str, Any] = {"cv_folds": len(folds), "models": {}}
+    diagnostics: Dict[str, Any] = {"cv_folds": len(folds), "embargo_eras": embargo, "models": {}}
     lgb_eval_metric = default_lgb_eval_metric()
     steps_per_model = (len(folds) + 1) if folds else 1
     bar = utils.ProgressBar(
@@ -387,10 +453,11 @@ def train_base_models(
         fold_best_iters: List[int] = []
 
         if folds:
-            for fold_i, (val_era_start, val_era_end) in enumerate(folds, start=1):
+            for fold_i, (train_end_era, val_era_start, val_era_end) in enumerate(folds, start=1):
+                # train_end_era: last era index for training (embargo gap applied)
+                train_end_row = int(era_ends[train_end_era]) if train_end_era < len(era_ends) else int(era_starts[val_era_start])
                 val_start_row = int(era_starts[val_era_start])
                 val_end_row = int(era_ends[val_era_end])
-                train_end_row = val_start_row
 
                 mdl = builder()
                 if kind == "lgb":
@@ -400,6 +467,7 @@ def train_base_models(
                         eval_set=(X.iloc[val_start_row:val_end_row], y.iloc[val_start_row:val_end_row]),
                         eval_metric=lgb_eval_metric,
                         early_stopping_rounds=early_stopping_rounds,
+                        sample_weight=sample_weights.iloc[:train_end_row],
                     )
                     best_it = getattr(mdl, "best_iteration_", None)
                     if isinstance(best_it, int) and best_it > 0:
@@ -411,7 +479,10 @@ def train_base_models(
                 bar.update(1, f"{name} fold {fold_i}/{len(folds)}")
         else:
             mdl = builder()
-            mdl.train(X, y)
+            if kind == "lgb":
+                mdl.train(X, y, sample_weight=sample_weights)
+            else:
+                mdl.train(X, y)
             fold_pred[:] = mdl.predict(X).astype(np.float32)
             bar.update(1, f"{name} fit")
 
@@ -419,10 +490,11 @@ def train_base_models(
 
         final_model = builder()
         if kind == "lgb" and fold_best_iters:
-            # Train a final model using a stable number of boosting rounds from CV
             stable_rounds = int(np.median(np.array(fold_best_iters, dtype=int)))
-            final_model.train(X, y, num_boost_round=stable_rounds)
+            final_model.train(X, y, num_boost_round=stable_rounds, sample_weight=sample_weights)
             diagnostics["models"][name] = {"stable_rounds": stable_rounds, "fold_best_iters": fold_best_iters}
+        elif kind == "lgb":
+            final_model.train(X, y, sample_weight=sample_weights)
         else:
             final_model.train(X, y)
         fitted_models[name] = final_model
@@ -450,8 +522,76 @@ def save_model(path: Path, model: Any, *, quiet: bool = False) -> None:
         utils.log(f"Saved model: {path}")
 
 
+def train_single_target(
+    df_train: pd.DataFrame,
+    df_holdout: pd.DataFrame,
+    feature_cols: List[str],
+    target_col: str,
+    params_cfg: Dict[str, Any],
+    training_cfg: Dict[str, Any],
+    model_specs: Sequence[Tuple[str, Callable[[], Any], str]],
+    aggregator: str,
+    models_dir: Path,
+    n_folds: int,
+    seed: int,
+    early_stopping_rounds: int,
+    embargo: int,
+    holdout_eras: int,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Train all base models for a single target and return (fitted_models, diagnostics)."""
+    utils.ensure_dir(models_dir)
+
+    fitted_models, oof_preds, diagnostics = train_base_models(
+        df_train,
+        feature_cols,
+        target_col,
+        params_cfg,
+        model_specs,
+        n_folds,
+        seed,
+        early_stopping_rounds,
+        models_dir,
+        embargo=embargo,
+    )
+
+    stk: stacker.ModelStacker | None = None
+    if aggregator == "ridge":
+        train_targets = df_train[target_col]
+        oof_matrix = oof_preds.dropna(axis=0, how="any")
+        aligned_target = train_targets.iloc[oof_matrix.index]
+        stk = train_stacker(oof_matrix, aligned_target, params_cfg, models_dir)
+
+    # Save per-target model spec
+    utils.save_json(
+        {
+            "base_models": [name for name, _, _ in model_specs],
+            "aggregator": aggregator,
+            "target_col": target_col,
+        },
+        models_dir / "model_spec.json",
+    )
+
+    # Holdout evaluation for this target
+    if not df_holdout.empty and target_col in df_holdout.columns:
+        X_hold = df_holdout[list(feature_cols)]
+        y_hold = df_holdout[target_col].to_numpy()
+        eras_hold = df_holdout["era"].to_numpy()
+        base_preds = {name: mdl.predict(X_hold).astype(np.float32).to_numpy() for name, mdl in fitted_models.items()}
+        base_df = pd.DataFrame(base_preds)
+        if aggregator == "ridge" and stk is not None:
+            final_pred = stk.predict(base_df).to_numpy(dtype=np.float32)
+        else:
+            final_pred = base_df.mean(axis=1).to_numpy(dtype=np.float32)
+        corrs = utils.corr_by_era(eras_hold, y_hold, final_pred)
+        summary = utils.corr_summary(corrs)
+        utils.log(f"  [{target_col}] holdout: mean corr={summary['mean']:.6f} | std={summary['std']:.6f} | sharpe={summary['sharpe']:.3f}")
+        diagnostics["holdout_summary"] = summary
+
+    return fitted_models, diagnostics
+
+
 def main() -> None:
-    """Main training routine with stacking."""
+    """Main training routine with multi-target support."""
     args = parse_args()
     training_cfg, params_cfg, features_cfg = load_configs(args.config, args.params, args.features)
 
@@ -459,9 +599,17 @@ def main() -> None:
     n_folds = resolve_n_folds(training_cfg)
     seed = resolve_seed(training_cfg)
     early_stopping_rounds = int((training_cfg.get("general", {}) or {}).get("early_stopping_rounds", 200) or 200)
+    embargo = int((training_cfg.get("general", {}) or {}).get("embargo_eras", 4) or 4)
     models_dir = PROJECT_ROOT / "models"
     utils.ensure_dir(models_dir)
-    model_specs, aggregator = resolve_model_specs(training_cfg, params_cfg, seed=seed)
+
+    # Detect multi-target early so we can optimize seed count
+    mt_cfg = training_cfg.get("multi_target", {}) or {}
+    mt_targets_cfg = mt_cfg.get("targets")
+    multi_target_hint = bool(mt_targets_cfg and mt_targets_cfg != [])
+    model_specs, aggregator = resolve_model_specs(
+        training_cfg, params_cfg, seed=seed, multi_target_active=multi_target_hint,
+    )
 
     # Era-based holdout (last N eras) for honest offline metrics
     holdout_eras = resolve_holdout_eras(training_cfg)
@@ -478,19 +626,28 @@ def main() -> None:
     selected_features, feature_scores = select_feature_columns(df_train_view, feature_cols, target_col, features_cfg, seed=seed)
     if selected_features:
         feature_cols = selected_features
-        keep_cols = ["era", target_col] + list(feature_cols)
-        df = df[keep_cols]
-    else:
-        feature_scores = pd.DataFrame(columns=["feature", "corr", "abs_corr"])
-        keep_cols = ["era", target_col] + list(feature_cols)
-        df = df[keep_cols]
 
-    # Split after feature selection so we don't duplicate the full 2k+ feature frame.
+    # Determine target columns to keep
+    mt_cfg = training_cfg.get("multi_target", {}) or {}
+    multi_targets = resolve_multi_targets(training_cfg, list(df.columns))
+    # Filter to targets that actually exist and are not all-NaN
+    multi_targets = [t for t in multi_targets if t in df.columns and df[t].notna().any()]
+
+    if multi_targets:
+        all_target_cols = list(set(multi_targets))
+        utils.log(f"Multi-target mode: {len(all_target_cols)} targets detected")
+    else:
+        all_target_cols = [target_col]
+
+    keep_cols = list(set(["era"] + all_target_cols + list(feature_cols)))
+    df = df[[c for c in keep_cols if c in df.columns]]
+
+    # Split after feature selection
     df_train = df.iloc[:holdout_start].copy()
     df_holdout = df.iloc[holdout_start:].copy()
     del df_train_view
 
-    # Cast selected features only (saves RAM vs casting the full 2k+ feature set)
+    # Cast features to float32
     df_train[feature_cols] = df_train[feature_cols].astype(np.float32, copy=False)
     if not df_holdout.empty:
         df_holdout[feature_cols] = df_holdout[feature_cols].astype(np.float32, copy=False)
@@ -508,54 +665,91 @@ def main() -> None:
     if not feature_scores.empty:
         feature_scores.to_csv(models_dir / "feature_scores.csv", index=False)
 
-    utils.save_json(
-        {
-            "base_models": [name for name, _, _ in model_specs],
-            "aggregator": aggregator,
-        },
-        models_dir / "model_spec.json",
-    )
+    # --- Multi-target training loop ---
+    if len(all_target_cols) > 1:
+        all_diagnostics = {}
+        trained_targets: List[str] = []
+        target_sharpes: Dict[str, float] = {}
+        for ti, tgt in enumerate(all_target_cols, start=1):
+            # Skip targets with too many NaNs in training data
+            if df_train[tgt].isna().mean() > 0.5:
+                utils.log(f"  Skipping {tgt}: >50% NaN in training data")
+                continue
+            utils.log(f"=== Target {ti}/{len(all_target_cols)}: {tgt} ===")
+            target_models_dir = models_dir / tgt
+            _, diag = train_single_target(
+                df_train, df_holdout, feature_cols, tgt,
+                params_cfg, training_cfg, model_specs, aggregator,
+                target_models_dir, n_folds, seed, early_stopping_rounds,
+                embargo, holdout_eras,
+            )
+            all_diagnostics[tgt] = diag
+            trained_targets.append(tgt)
+            # Collect Sharpe for weighted blending
+            holdout_summary = diag.get("holdout_summary", {})
+            sharpe = holdout_summary.get("sharpe", 0.0)
+            if not np.isfinite(sharpe):
+                sharpe = 0.0
+            target_sharpes[tgt] = max(0.0, sharpe)  # clip negative Sharpe to 0
 
-    fitted_models, oof_preds, diagnostics = train_base_models(
-        df_train,
-        feature_cols,
-        target_col,
-        params_cfg,
-        model_specs,
-        n_folds,
-        seed,
-        early_stopping_rounds,
-        models_dir,
-    )
-
-    stk: stacker.ModelStacker | None = None
-    if aggregator == "ridge":
-        # Train stacker on rows where we have OOF predictions (skip warmup eras)
-        train_targets = df_train[target_col]
-        oof_matrix = oof_preds.dropna(axis=0, how="any")
-        aligned_target = train_targets.iloc[oof_matrix.index]
-        stk = train_stacker(oof_matrix, aligned_target, params_cfg, models_dir)
-
-    # Offline evaluation on holdout eras
-    if not df_holdout.empty:
-        X_hold = df_holdout[list(feature_cols)]
-        y_hold = df_holdout[target_col].to_numpy()
-        eras_hold = df_holdout["era"].to_numpy()
-        base_preds = {name: mdl.predict(X_hold).astype(np.float32).to_numpy() for name, mdl in fitted_models.items()}
-        base_df = pd.DataFrame(base_preds)
-        if aggregator == "ridge" and stk is not None:
-            final_pred = stk.predict(base_df).to_numpy(dtype=np.float32)
+        # Compute blend weights from Sharpe ratios
+        blend_mode = str(mt_cfg.get("blend", "mean")).strip().lower()
+        target_weights: Dict[str, float] = {}
+        if blend_mode == "sharpe_weighted" and target_sharpes:
+            total_sharpe = sum(target_sharpes.values())
+            if total_sharpe > 0:
+                target_weights = {t: s / total_sharpe for t, s in target_sharpes.items()}
+                utils.log(f"Sharpe-weighted blend: top 5 weights = {sorted(target_weights.items(), key=lambda x: -x[1])[:5]}")
+            else:
+                # All Sharpes <= 0, fall back to equal weights
+                target_weights = {t: 1.0 / len(trained_targets) for t in trained_targets}
+                utils.log("All target Sharpes <= 0, falling back to equal weights")
         else:
-            final_pred = base_df.mean(axis=1).to_numpy(dtype=np.float32)
-        corrs = utils.corr_by_era(eras_hold, y_hold, final_pred)
-        summary = utils.corr_summary(corrs)
-        utils.log(f"Holdout eras: {holdout_eras} | mean corr={summary['mean']:.6f} | std={summary['std']:.6f} | sharpe={summary['sharpe']:.3f}")
+            target_weights = {t: 1.0 / len(trained_targets) for t in trained_targets}
+
+        # Save global model spec with multi-target info + weights
         utils.save_json(
-            {"holdout": {"eras": holdout_eras, "summary": summary}, "diagnostics": diagnostics, "aggregator": aggregator},
+            {
+                "multi_target": True,
+                "targets": trained_targets,
+                "target_weights": target_weights,
+                "target_sharpes": target_sharpes,
+                "base_models": [name for name, _, _ in model_specs],
+                "aggregator": aggregator,
+                "blend": blend_mode,
+            },
+            models_dir / "model_spec.json",
+        )
+        utils.save_json(
+            {"multi_target": True, "targets": trained_targets, "target_sharpes": target_sharpes, "diagnostics": all_diagnostics},
             models_dir / "metrics.json",
         )
+        utils.log(f"Multi-target training complete: {len(trained_targets)} targets trained.")
+
     else:
-        utils.log("No holdout split configured; skipping holdout metrics.")
+        # --- Single-target mode (backward compatible) ---
+        utils.save_json(
+            {
+                "multi_target": False,
+                "base_models": [name for name, _, _ in model_specs],
+                "aggregator": aggregator,
+            },
+            models_dir / "model_spec.json",
+        )
+
+        fitted_models, diagnostics = train_single_target(
+            df_train, df_holdout, feature_cols, target_col,
+            params_cfg, training_cfg, model_specs, aggregator,
+            models_dir, n_folds, seed, early_stopping_rounds,
+            embargo, holdout_eras,
+        )
+
+        holdout_summary = diagnostics.get("holdout_summary")
+        if holdout_summary:
+            utils.save_json(
+                {"holdout": {"eras": holdout_eras, "summary": holdout_summary}, "diagnostics": diagnostics, "aggregator": aggregator},
+                models_dir / "metrics.json",
+            )
 
     utils.log("Training complete.")
 

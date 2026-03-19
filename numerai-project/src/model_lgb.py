@@ -26,6 +26,7 @@ class LightGBMModel:
         eval_metric: Callable[[Any, Any], Tuple[str, float, bool]] | None = None,
         early_stopping_rounds: int | None = None,
         num_boost_round: int | None = None,
+        sample_weight: pd.Series | None = None,
     ) -> None:
         """Train the LightGBM model."""
         aligned_params = utils.align_lightgbm_aliases(self.params)
@@ -48,6 +49,8 @@ class LightGBMModel:
             self.model.fit(dummy, dummy_target)
             return
         fit_kwargs: Dict[str, Any] = {}
+        if sample_weight is not None:
+            fit_kwargs["sample_weight"] = sample_weight.values if hasattr(sample_weight, "values") else sample_weight
         if eval_set is not None:
             X_val, y_val = eval_set
             fit_kwargs["eval_set"] = [(X_val, y_val)]

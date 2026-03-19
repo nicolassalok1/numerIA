@@ -171,34 +171,128 @@ def load_features(models_dir: Path, training_cfg: Dict[str, Any], features_cfg: 
     return features_df, ids, eras, Path(tournament_path)
 
 
-def predict(models_dir: Path, training_cfg: Dict[str, Any], params_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) -> pd.DataFrame:
-    """Generate predictions and save submission file."""
-    features_df, ids, eras, tournament_path = load_features(models_dir, training_cfg, features_cfg)
+def predict_single_target(
+    features_df: pd.DataFrame,
+    models_dir: Path,
+    params_cfg: Dict[str, Any],
+) -> pd.Series:
+    """Generate raw predictions for a single target's model directory."""
     models, stk, aggregator = load_models(models_dir, params_cfg)
 
     preds: Dict[str, pd.Series] = {}
-    bar = utils.ProgressBar(
-        total=len(models),
-        prefix="Predict",
-        unit="model",
-        enabled=utils.env_flag("NUMERAI_PROGRESS", True),
-    )
     for name, mdl in models.items():
         preds[name] = mdl.predict(features_df).reset_index(drop=True)
-        bar.update(1, f"{name}")
 
     base_pred_df = pd.DataFrame(preds)
     if aggregator == "ridge" and stk is not None:
         try:
-            final_pred = stk.predict(base_pred_df)
+            return stk.predict(base_pred_df)
         except Exception:
-            final_pred = base_pred_df.mean(axis=1)
+            return base_pred_df.mean(axis=1)
+    return base_pred_df.mean(axis=1)
+
+
+def predict(models_dir: Path, training_cfg: Dict[str, Any], params_cfg: Dict[str, Any], features_cfg: Dict[str, Any]) -> pd.DataFrame:
+    """Generate predictions and save submission file (supports multi-target)."""
+    features_df, ids, eras, tournament_path = load_features(models_dir, training_cfg, features_cfg)
+
+    spec = load_model_spec(models_dir)
+    is_multi_target = spec.get("multi_target", False)
+
+    if is_multi_target:
+        # Multi-target: load models from each target subdirectory and blend
+        targets = spec.get("targets", [])
+        if not targets:
+            raise ValueError("multi_target=True but no targets listed in model_spec.json")
+        target_weights = spec.get("target_weights", {})
+
+        target_preds: List[pd.Series] = []
+        pred_weights: List[float] = []
+        bar = utils.ProgressBar(
+            total=len(targets),
+            prefix="Predict",
+            unit="target",
+            enabled=utils.env_flag("NUMERAI_PROGRESS", True),
+        )
+        for tgt in targets:
+            target_dir = models_dir / tgt
+            if not target_dir.exists():
+                utils.log(f"  Skipping {tgt}: directory not found")
+                bar.update(1, f"{tgt} (skip)")
+                continue
+            pred = predict_single_target(features_df, target_dir, params_cfg)
+            target_preds.append(pred.reset_index(drop=True))
+            pred_weights.append(float(target_weights.get(tgt, 1.0 / len(targets))))
+            bar.update(1, f"{tgt}")
+
+        if not target_preds:
+            raise ValueError("No target predictions produced. Check model directories.")
+
+        # Blend predictions using weights (Sharpe-weighted or equal)
+        blend = str(spec.get("blend", "mean")).strip().lower()
+        pred_matrix = pd.concat(target_preds, axis=1)
+        if blend == "sharpe_weighted" and pred_weights:
+            # Normalize weights to sum to 1
+            w = np.array(pred_weights, dtype=np.float64)
+            w_sum = w.sum()
+            if w_sum > 0:
+                w = w / w_sum
+            else:
+                w = np.ones_like(w) / len(w)
+            final_pred = pred_matrix.values @ w
+            final_pred = pd.Series(final_pred, index=pred_matrix.index)
+            utils.log(f"Multi-target Sharpe-weighted blend: {len(target_preds)} targets")
+        else:
+            final_pred = pred_matrix.mean(axis=1)
+            utils.log(f"Multi-target equal-weight blend: {len(target_preds)} targets")
+
     else:
-        final_pred = base_pred_df.mean(axis=1)
+        # Single-target: original behavior
+        models, stk, aggregator = load_models(models_dir, params_cfg)
+
+        preds: Dict[str, pd.Series] = {}
+        bar = utils.ProgressBar(
+            total=len(models),
+            prefix="Predict",
+            unit="model",
+            enabled=utils.env_flag("NUMERAI_PROGRESS", True),
+        )
+        for name, mdl in models.items():
+            preds[name] = mdl.predict(features_df).reset_index(drop=True)
+            bar.update(1, f"{name}")
+
+        base_pred_df = pd.DataFrame(preds)
+        if aggregator == "ridge" and stk is not None:
+            try:
+                final_pred = stk.predict(base_pred_df)
+            except Exception:
+                final_pred = base_pred_df.mean(axis=1)
+        else:
+            final_pred = base_pred_df.mean(axis=1)
+
     submission = pd.DataFrame({"id": ids, "prediction": final_pred.values})
 
-    # Post-processing: ranking improves stability and often boosts corr
+    # Feature neutralization: reduce feature exposure for better Sharpe
     pred_cfg = (training_cfg.get("prediction", {}) or {})
+    do_neutralize = pred_cfg.get("neutralize", False)
+    neutralize_proportion = float(pred_cfg.get("neutralize_proportion", 0.5) or 0.5)
+    if do_neutralize and neutralize_proportion > 0:
+        if eras is not None:
+            # Per-era neutralization (correct: each era has different feature distributions)
+            utils.log(f"Applying per-era feature neutralization (proportion={neutralize_proportion})")
+            preds_series = pd.Series(submission["prediction"].values, index=features_df.index)
+            era_series = pd.Series(eras.values, index=features_df.index)
+            neutralized = utils.neutralize_per_era(preds_series, features_df, era_series, proportion=neutralize_proportion)
+            submission["prediction"] = neutralized.values
+        else:
+            # Global neutralization fallback (no eras available)
+            utils.log(f"Applying global feature neutralization (proportion={neutralize_proportion})")
+            pred_frame = submission[["prediction"]].copy()
+            pred_frame.index = features_df.index
+            neutralized = utils.neutralize(pred_frame, features_df, proportion=neutralize_proportion)
+            submission["prediction"] = neutralized["prediction"].values
+
+    # Post-processing: ranking improves stability and often boosts corr
     do_rank = pred_cfg.get("rank", True)
     rank_by_era = pred_cfg.get("rank_by_era", True)
     if do_rank:

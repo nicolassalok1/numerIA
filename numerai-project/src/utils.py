@@ -368,3 +368,55 @@ def rank_uniform(values: pd.Series, era: pd.Series | None = None) -> pd.Series:
     else:
         ranked = values.groupby(era, observed=True).rank(pct=True, method="first")
     return ranked.clip(0.0, 1.0)
+
+
+def neutralize(
+    predictions: pd.DataFrame,
+    neutralizers: pd.DataFrame,
+    proportion: float = 1.0,
+) -> pd.DataFrame:
+    """Neutralize predictions against neutralizer features using least squares.
+
+    Removes the component of predictions correlated with neutralizers,
+    leaving only the residual unique signal. This reduces feature exposure
+    and improves Sharpe ratio on Numerai.
+    """
+    if neutralizers.isna().any().any():
+        neutralizers = neutralizers.fillna(0.0)
+    predictions = predictions.copy()
+    # Zero-std columns get NaN to avoid division issues
+    zero_std = predictions.columns[predictions.std() == 0]
+    if len(zero_std) > 0:
+        predictions[zero_std] = np.nan
+    pred_arr = predictions.values
+    neut_arr = neutralizers.values.astype(np.float64, copy=False)
+    # Add intercept column
+    neut_arr = np.hstack((neut_arr, np.ones((neut_arr.shape[0], 1), dtype=neut_arr.dtype)))
+    inverse = np.linalg.pinv(neut_arr, rcond=1e-6)
+    adjustments = proportion * neut_arr.dot(inverse.dot(pred_arr))
+    neutral = pred_arr - adjustments
+    return pd.DataFrame(neutral, index=predictions.index, columns=predictions.columns)
+
+
+def neutralize_per_era(
+    predictions: pd.Series,
+    features: pd.DataFrame,
+    era: pd.Series,
+    proportion: float = 1.0,
+) -> pd.Series:
+    """Neutralize predictions per-era (correct approach for Numerai).
+
+    Each era has different feature distributions, so neutralization
+    must happen within each era separately.
+    """
+    result = predictions.copy()
+    for era_val in era.unique():
+        mask = era == era_val
+        if mask.sum() < 2:
+            continue
+        idx = mask[mask].index
+        pred_frame = predictions.loc[idx].to_frame("prediction")
+        feat_frame = features.loc[idx]
+        neutralized = neutralize(pred_frame, feat_frame, proportion=proportion)
+        result.loc[idx] = neutralized["prediction"].values
+    return result

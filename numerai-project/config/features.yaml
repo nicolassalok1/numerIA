@@ -1,7 +1,8 @@
 features:
   prefix: "feature"
-  max_features: 800        # augmente progressivement (800 -> 1200 -> 2376 si stable)
-  corr_sample_rows: 1000000 # échantillon pour scorer les features (corr avec target)
-  min_corr_abs: 0.0        # on prend surtout le top-K (via max_features)
-  max_na_ratio: 0.10       # trop de NA -> dehors
-  standardize: true        # je standardise pour que MLP/LGBM restent stables
+  max_features: 0            # 0 = pas de limite, on utilise TOUTES les features
+                             # avec feature_fraction=0.1 LGB fait sa propre sélection par arbre
+  corr_sample_rows: 1000000  # échantillon pour scorer les features (corr avec target)
+  min_corr_abs: 0.0          # pas de filtre par corrélation
+  max_na_ratio: 0.10         # trop de NA -> dehors
+  standardize: true          # je standardise pour que MLP/LGBM restent stables

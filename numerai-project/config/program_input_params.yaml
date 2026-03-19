@@ -4,20 +4,20 @@ model:
   device_type: gpu             # je force le GPU
   gpu_device_id: 0             # 4060 = device 0
 
-  # Arbre bien large (profil "agressif" que j'utilise)
-  num_leaves: 384              # plus large que 256, ça capture plus de signal
-  min_data_in_leaf: 50         # je garde un minimum pour éviter de trop overfit
-  min_sum_hessian_in_leaf: 0.1 # 0.001 m'a paru trop instable
+  # Arbre large mais bien régularisé
+  num_leaves: 512              # large pour capturer du signal non-linéaire
+  min_data_in_leaf: 3000       # HAUSSE FORTE : données financières bruitées, petites feuilles = bruit
+  min_sum_hessian_in_leaf: 1.0 # plus strict pour éviter les splits faibles
   max_bin: 511                 # tolérable côté VRAM avec ce setup
 
   # Régul L2
-  lambda_l2: 8.0               # j'ai monté la L2 pour calmer les leaves
+  lambda_l2: 10.0              # L2 renforcée pour compenser num_leaves élevé
 
   # Sous-échantillonnage
   bagging_fraction: 0.7        # 0.8 surchauffait, 0.7 généralise mieux
-  feature_fraction: 0.7        # je limite le nombre de features vues par arbre
+  feature_fraction: 0.1        # BAISSE FORTE : 0.7 -> 0.1, force la diversité entre arbres
   bagging_freq: 1
 
   # Optimisation
-  learning_rate: 0.03
-  n_estimators: 2500           # plus de rounds pour compenser le LR
+  learning_rate: 0.005         # BAISSE : LR lent = meilleure généralisation
+  n_estimators: 10000          # HAUSSE : compense le LR bas, early stopping coupe si nécessaire
