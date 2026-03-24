@@ -1,121 +1,80 @@
 ## Numerai – Guide complet (GPU RTX 4060)
 
-Ce fichier est un aide-mémoire détaillé pour relancer l’entraînement/prédiction et la soumission Numerai après plusieurs mois.
+Aide-mémoire pour l'entraînement, la prédiction et la soumission Numerai.
 
 ### 1. Pré-requis système et environnement
 - OS : Windows, PowerShell 7.
 - GPU : NVIDIA RTX 4060 (8 Go) avec drivers récents (`nvidia-smi` doit fonctionner).
-- Python : environnement conda/micromamba `lgbm-gpu` avec LightGBM compilé CUDA (CUDA toolkit 12.6, compatible runtime 12.9 des drivers).
-  - Créer/mettre à jour l’environnement GPU : `pwsh -File ..\setup_conda_lightgbm_cuda.ps1 -EnvName lgbm-gpu -PythonVersion 3.11`.
-  - Vérifier l’env : `micromamba run -n lgbm-gpu python -c "import lightgbm, sys; print(lightgbm.__version__, sys.version)"`.
-  - Test GPU rapide : `python ..\test_lightgbm_gpu.py` (attendu : `device: cuda`).
-- Stockage : données Numerai dans `data/`, modèles dans `models/`, scripts dans `src/`.
-- Données déjà présentes : `data/numerai_training_data.parquet` et `data/numerai_tournament_data.parquet` doivent exister (le pipeline ne les télécharge pas automatiquement).
+- Python : environnement conda `lgbm-gpu` avec LightGBM compilé CUDA (CUDA toolkit 12.6).
+  - Créer/mettre à jour l'environnement GPU : `pwsh -File scripts\setup_conda_lightgbm_cuda.ps1 -EnvName lgbm-gpu -PythonVersion 3.11`.
+  - Test GPU rapide : `python scripts\test_lightgbm_gpu.py` (attendu : `device: cuda`).
+- Stockage : données dans `data/`, modèles dans `models/`, scripts dans `src/`.
 
-### 2. Scripts clés
-- `run_me.ps1` (racine `numerIA`, un niveau au-dessus de `numerai-project`) : orchestration PowerShell (détection du GPU, affichage VRAM, train + predict + upload API, vérif cred Numerai).
+### 2. Modèles et nodes AWS
+
+| Tournament | Modèle | Node folder | Pickle |
+|---|---|---|---|
+| Classic (t8) | salok1_classic | `classic-node/` | `salok1_classic.pkl` |
+| Signals (t11) | salok1_signals | `signals-node/` | `signals.pkl` |
+| Crypto (t12) | salok1 | `crypto-node/` | `salok1.pkl` |
+| Classic (t8) | tgrv2 | `tgrv2-node/` | `tgrv2.pkl` |
+
+Chaque node contient un `Dockerfile`, `predict.py`, `requirements.txt` et le pickle du modèle. Le webhook Numerai déclenche la soumission automatiquement chaque jour.
+
+### 3. Scripts clés
+- `run_me.ps1` (racine `numerIA`) : orchestration PowerShell (détection GPU, VRAM, train + predict + upload API).
 - `src/train.py` : entraînement (KFold + stacking).
 - `src/predict.py` : prédiction et génération de `submission.csv`.
-- `config/program_input_params.yaml` : hyperparamètres LightGBM utilisés par défaut.
+- `config/program_input_params.yaml` : hyperparamètres LightGBM.
 - `config/features.yaml` / `config/training.yaml` : sélection de features + chemins de fichiers.
 
-### 3. Pipeline scripté (PowerShell)
-Ce mode détecte le GPU, affiche la VRAM libre et enchaîne train → predict → upload Numerai à partir des fichiers de config actuels. Il ne télécharge pas les datasets (ils doivent déjà être dans `data/`).
+### 4. Pipeline scripté (PowerShell)
 
-Depuis `numerIA` (racine, dossier parent de `numerai-project`) :
+Depuis `numerIA` (racine) :
 ```powershell
 pwsh -File .\run_me.ps1
 ```
-Si tu es déjà dans `numerai-project`, lance :
-```powershell
-pwsh -File ..\run_me.ps1
-```
 Ce que fait le script :
-1) Détecte le GPU et lit la VRAM libre via `nvidia-smi` (affichage uniquement).
-2) Utilise les hyperparamètres fixés dans `config/program_input_params.yaml` (source de vérité éditable).
-3) Entraîne le modèle :
-   ```powershell
-   python src/train.py --config config/training.yaml --params config/program_input_params.yaml --features config/features.yaml
-   ```
-4) Lance la prédiction :
-   ```powershell
-   python src/predict.py --config config/training.yaml --params config/program_input_params.yaml --features config/features.yaml
-   ```
-5) Soumet `submission.csv` via l’API Numerai avec les variables d’environnement présentes dans la session PowerShell (`NUMERAI_PUBLIC_ID`, `NUMERAI_SECRET_KEY`, `NUMERAI_MODEL_ID`).
+1. Détecte le GPU et lit la VRAM libre via `nvidia-smi`.
+2. Utilise les hyperparamètres de `config/program_input_params.yaml`.
+3. Entraîne le modèle via `src/train.py`.
+4. Lance la prédiction via `src/predict.py`.
+5. Soumet `submission.csv` via l'API Numerai.
 
-Avant de lancer le script, définis les secrets dans ta session (éviter de les laisser dans le fichier) :
+Avant de lancer, charger les secrets via `keys_local.ps1` (racine, git-ignored) :
 ```powershell
-$env:NUMERAI_PUBLIC_ID="VRAI_PUBLIC_ID"
-$env:NUMERAI_SECRET_KEY="VRAIE_SECRET_KEY"
-$env:NUMERAI_MODEL_ID="VRAI_MODEL_ID"
+$env:NUMERAI_PUBLIC_ID="..."
+$env:NUMERAI_SECRET_KEY="..."
+$env:NUMERAI_MODEL_ID="..."
 ```
-Option pratique : crée `scripts/keys_local.ps1` (déjà ignoré par git) ou `keys_local.ps1` à la racine (même dossier que `run_me.ps1`) avec ces trois lignes, il sera chargé automatiquement par `run_me.ps1`.
-Le script rafraîchit aussi les datasets Numerai (`train.parquet` et `live.parquet`) avant d’entraîner/prédire, sauf si `SKIP_DATA_REFRESH=1` est défini.
 
-### 4. Pipeline manuel (sans auto-VRAM)
-Depuis `numerai-project`, avec les paramètres statiques existants (LightGBM GPU agressif) :
+Le script rafraîchit les datasets sauf si `SKIP_DATA_REFRESH=1`.
+
+### 5. Scripts par tournoi
+- `run_classic_v5.ps1` : Classic training + `salok1_classic.pkl` -> `classic-node/`
+- `run_signals_v2.ps1` : Signals training + `signals.pkl` -> `signals-node/`
+- `run_crypto_v2.ps1` : Crypto training + `salok1.pkl` -> `crypto-node/`
+
+### 6. Automatisation quotidienne
+
 ```powershell
-python src/train.py   --config config/training.yaml --params config/program_input_params.yaml --features config/features.yaml
-python src/predict.py --config config/training.yaml --params config/program_input_params.yaml --features config/features.yaml
+# Config + train + deploy + test des 4 nodes
+pwsh -File .\daily_full_setup.ps1
+
+# Train + deploy uniquement (sans config ni test)
+pwsh -File .\daily_retrain_deploy.ps1
+
+# Health check des 4 nodes
+pwsh -File .\health_check.ps1
+
+# Planification quotidienne via Task Scheduler
+pwsh -File .\daily_full_setup.ps1 -ScheduleTime 02:30
 ```
-Les modèles entraînés sont déposés dans `models/` et la soumission dans `submission.csv` (chemins définis dans `config/training.yaml`). Assure-toi que les fichiers `data/numerai_training_data.parquet` et `data/numerai_tournament_data.parquet` sont présents.
 
-### 5. Soumission Numerai via l’API `numerapi`
-Définir les secrets dans la session PowerShell (copiés depuis le dashboard Numerai) :
-```powershell
-$env:NUMERAI_PUBLIC_ID="VRAI_PUBLIC_ID"
-$env:NUMERAI_SECRET_KEY="VRAIE_SECRET_KEY"
-$env:NUMERAI_MODEL_ID="VRAI_MODEL_ID"
-```
-Soumettre `submission.csv` :
-```powershell
-@'
-from numerapi import NumerAPI
-import os
-napi = NumerAPI(os.environ["NUMERAI_PUBLIC_ID"], os.environ["NUMERAI_SECRET_KEY"])
-resp = napi.upload_predictions("submission.csv", model_id=os.environ["NUMERAI_MODEL_ID"])
-print("Upload status:", resp)
-'@ | python -
-```
-Le retour doit contenir un ID de submission. Vérifier ensuite le statut sur le dashboard ou via l’API.
-
-### 6. Dépannage rapide
-- `session is invalid or expired` : Secret Key ou Public ID incorrects/expirés, ou Model ID non associé au compte. Regénérer la Secret Key et vérifier le Model ID.
-- `invalid_submission_ids` : le live set est obsolète. Laisse `run_me.ps1` rafraîchir les datasets (ou supprime `SKIP_DATA_REFRESH`) pour récupérer le dernier `live.parquet`.
-- Données absentes : le pipeline ne télécharge pas. Récupérer les fichiers Numerai officiels et placer `numerai_training_data.parquet` et `numerai_tournament_data.parquet` dans `data/`.
-- `nvidia-smi` absent : installer/mettre à jour les drivers NVIDIA ou définir `GPU_REQUIRED=0` (mais perte GPU).
-- `git add` échoue sur `.venv/` : ajouter `.venv/` à `.gitignore`.
-- VRAM insuffisante : baisser les tiers (safe/medium) ou réduire `row_limit` / `max_features` dans `config/training.yaml` / `config/features.yaml`.
-- Paramètres manquants : le projet n’utilise plus `config/model_params.yaml`; passer `--params config/program_input_params.yaml` à `train.py` et `predict.py`.
-
-### 7. Références utiles
-- `run_me.ps1` (racine `numerIA`) : pipeline complet (train + predict + upload) utilisant `config/program_input_params.yaml` (vérifie les credentials Numerai avant le run).
-- `config/program_input_params.yaml` : hyperparamètres LightGBM (tiers agressif par défaut).
-- `config/features.yaml` / `config/training.yaml` : sélection des features et chemins des fichiers.
-- `submission.csv` : sortie finale à soumettre.
-- `setup_conda_lightgbm_cuda.ps1` : build/installation de LightGBM CUDA dans un env conda.
-- Environnement GPU : LightGBM compilé CUDA 12.6 (compatible runtime driver 12.9).
-
-### 8. Signals v2 (tournament 11)
-- Script dédié (racine `numerIA`) : `run_signals_v2.ps1` pour entraîner sur Signals, générer `signals.pkl` et le copier dans `numerai-project/signals-node`.
-- Dataset Signals (par défaut) : version `signals/v2.1` (modifiable via `NUMERAI_SIGNALS_VERSION`).
-- Node Signals via Numerai CLI (exemple) :
-  - `numerai node -m <MODEL_NAME> -t 11 config -e signals-python3 -p "D:\PythonDProjects\numerIA\numerai-project\signals-node"`
-  - `numerai node -m <MODEL_NAME> -t 11 deploy`
-  - `numerai node -m <MODEL_NAME> -t 11 test`
-
-### 9. Automatisation quotidienne (Classic + Signals + Crypto)
-- Script racine : `daily_retrain_deploy.ps1`
-- Il enchaîne : entraînement + génération des pickles + `numerai node deploy` pour les 3 tournois.
-- Optionnel : `NUMERAI_DAILY_TEST=1` pour exécuter un `test` après deploy.
-
-
-
-
-
-
-
-
-
-(base) PS D:\PythonDProjects\numerIA> C:\Users\nicol\AppData\Roaming\Python\Python313\Scripts\numerai.exe upgrade
-Upgrading, do not interrupt or else your environment may be corrupted.
+### 7. Dépannage rapide
+- `session is invalid or expired` : Secret Key ou Public ID incorrects/expirés. Regénérer depuis le dashboard.
+- `invalid_submission_ids` : le live set est obsolète. Laisser `run_me.ps1` rafraîchir les datasets.
+- `numerai` non trouvé dans PATH : utiliser le chemin complet `C:\Users\nicol\AppData\Roaming\Python\Python313\Scripts\numerai.exe`.
+- Docker non lancé : démarrer Docker Desktop avant `numerai node config/deploy/test`.
+- Terraform state corrompu (batch job queue) : voir `README-AWS.md` section Troubleshooting.
+- VRAM insuffisante : réduire `row_limit` / `max_features` dans les fichiers de config.

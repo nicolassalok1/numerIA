@@ -1,1 +1,0 @@
-Merci. Si tu veux verrouiller la config pour un nouveau PC, le point d’entrée est setup_plug_and_play.ps1, puis daily_full_setup.ps1, et health_check.ps1 pour valider.

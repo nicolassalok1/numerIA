@@ -35,6 +35,16 @@ keys_local.ps1
 numerai-project/keys_local.ps1
 numerai-project/scripts/keys_local.ps1
 
+# LightGBM build artifacts & source (compiled locally, not project code)
+lightgbm/
+lightgbm_gpu_build/
+
+# Temp / scratch
+.tmp/
+*.temp
+tf_schema.json
+lis-moi
+
 # OS noise
 .DS_Store
 Thumbs.db
