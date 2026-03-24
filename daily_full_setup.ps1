@@ -23,10 +23,13 @@ $SignalsModel   = "salok1_signals"
 $SignalsModelId = "d8c538bd-ddfa-4456-8506-ab0cc8ef1c55"
 $CryptoModel    = "salok1"
 $CryptoModelId  = "ea40cb4a-a4a2-4434-8ff1-929a4c5c2673"
+$Tgrv2Model     = "tgrv2"
+$Tgrv2ModelId   = "f35f60cf-6784-45e5-a10c-2f348b6bb2a5"
 
 $ClassicNodeDir = Join-Path $ScriptDir "numerai-project\classic-node"
 $SignalsNodeDir = Join-Path $ScriptDir "numerai-project\signals-node"
 $CryptoNodeDir  = Join-Path $ScriptDir "numerai-project\crypto-node"
+$Tgrv2NodeDir   = Join-Path $ScriptDir "numerai-project\tgrv2-node"
 
 # Locate numerai CLI
 $numeraiCmd = Get-Command numerai -ErrorAction SilentlyContinue
@@ -84,6 +87,7 @@ if (-not $SkipConfig) {
     Ensure-NodeConfig -ModelName $ClassicModel -ModelId $ClassicModelId -Tournament 8 -NodeDir $ClassicNodeDir
     Ensure-NodeConfig -ModelName $SignalsModel -ModelId $SignalsModelId -Tournament 11 -NodeDir $SignalsNodeDir
     Ensure-NodeConfig -ModelName $CryptoModel -ModelId $CryptoModelId -Tournament 12 -NodeDir $CryptoNodeDir
+    Ensure-NodeConfig -ModelName $Tgrv2Model -ModelId $Tgrv2ModelId -Tournament 8 -NodeDir $Tgrv2NodeDir
 }
 
 Write-Host "=== Classic: train + pickle ==="
@@ -104,6 +108,9 @@ if (-not $SkipDeploy) {
 
     Write-Host "=== Deploy Crypto node ==="
     & $numeraiExe node -m $CryptoModel -t 12 deploy -v
+
+    Write-Host "=== Deploy TGRV2 node ==="
+    & $numeraiExe node -m $Tgrv2Model -t 8 deploy -v
 }
 
 if (-not $SkipTest) {
@@ -115,6 +122,9 @@ if (-not $SkipTest) {
 
     Write-Host "=== Test Crypto node ==="
     & $numeraiExe node -m $CryptoModel -t 12 test -v
+
+    Write-Host "=== Test TGRV2 node ==="
+    & $numeraiExe node -m $Tgrv2Model -t 8 test -v
 }
 
 if ($ScheduleTime) {

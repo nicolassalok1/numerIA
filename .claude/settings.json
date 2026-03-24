@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(aws lambda:*)",
+      "Bash(where aws:*)",
+      "Read(//c/Program Files/Amazon/AWSCLIV2/**)",
+      "Read(//d/PythonDProjects/numerIA/$LOCALAPPDATA/Programs/Python/Python313/Scripts/**)",
+      "Read(//d/PythonDProjects/numerIA/$APPDATA/Python/Python313/Scripts/**)",
+      "Bash(powershell.exe -Command \"Get-Command aws -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(powershell.exe -NoProfile -Command \"& { Get-Command aws -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source }\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://t5yh5t2n3dvvcea2jrg2kx4vqa0ybsfq.lambda-url.us-east-1.on.aws/\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://nmqzhawskjrcjk6dwso6jrk7t40vqzpc.lambda-url.us-east-1.on.aws/\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://us65lfykmtv4vej5lvjyfh3u240dulhd.lambda-url.us-east-1.on.aws/\")",
+      "Bash(curl -s \"https://t5yh5t2n3dvvcea2jrg2kx4vqa0ybsfq.lambda-url.us-east-1.on.aws/\")"
+    ]
+  }
+}

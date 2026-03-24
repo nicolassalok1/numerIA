@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d/PythonDProjects/numerIA/$USERPROFILE/.numerai/**)",
+      "Read(//d/PythonDProjects/numerIA/$USERPROFILE/**)"
+    ]
+  }
+}

@@ -13,6 +13,7 @@ $env:HTTP_PROXY=""; $env:HTTPS_PROXY=""; $env:ALL_PROXY=""
 $ClassicModel = "salok1_classic"
 $SignalsModel = "salok1_signals"
 $CryptoModel  = "salok1"
+$Tgrv2Model   = "tgrv2"
 
 # Locate numerai CLI
 $numeraiCmd = Get-Command numerai -ErrorAction SilentlyContinue
@@ -40,6 +41,10 @@ if ($LASTEXITCODE -ne 0) { $failed = $true }
 
 Write-Host "=== Health Check: Crypto (t12) ==="
 & $numeraiExe node -m $CryptoModel -t 12 test -v
+if ($LASTEXITCODE -ne 0) { $failed = $true }
+
+Write-Host "=== Health Check: TGRV2 (t8) ==="
+& $numeraiExe node -m $Tgrv2Model -t 8 test -v
 if ($LASTEXITCODE -ne 0) { $failed = $true }
 
 if ($failed) {
