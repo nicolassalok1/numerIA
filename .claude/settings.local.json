@@ -1,19 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c \"import ast; ast.parse\\(open\\(''src/model_xgb.py''\\).read\\(\\)\\); print\\(''model_xgb.py: OK''\\)\")",
-      "Bash(python -c \":*)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\(''src/build_upload_pkls.py''\\).read\\(\\)\\); print\\(''build_upload_pkls.py: OK''\\)\")",
+      "Bash(python -c:*)",
       "Bash(where python:*)",
       "Bash(conda info:*)",
-      "Read(//c/Users/Nathalie Asus/miniconda3/envs//**)",
-      "Read(//c/Users/Nathalie Asus/anaconda3/**)",
-      "Bash(PYTHON=\"/c/Users/Nathalie Asus/miniconda3/envs/numerai-env/python.exe\")",
-      "Bash(\"$PYTHON\" --version)",
-      "Bash(\"$PYTHON\" -c \"import numpy; print\\(''numpy:'', numpy.__version__\\); import pandas; print\\(''pandas:'', pandas.__version__\\); import lightgbm; print\\(''lightgbm:'', lightgbm.__version__\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\(''src/train.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\(''src/optimize.py''\\).read\\(\\)\\); print\\(''optimize.py: OK''\\)\")",
-      "Bash(\"/c/Users/Nathalie Asus/miniconda3/envs/numerai-env/python.exe\" -c \":*)",
       "Bash(winget --version)"
     ]
   }

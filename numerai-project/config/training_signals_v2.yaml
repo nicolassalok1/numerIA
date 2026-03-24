@@ -1,0 +1,27 @@
+general:
+  row_limit: null          # null = utilise tout le dataset
+  n_folds: 5               # CV par blocs temporels
+  holdout_eras: 30         # ajuste si peu de dates
+  early_stopping_rounds: 200
+  shuffle: true
+  stratify: false
+
+files:
+  train: "data/signals_v2/train.parquet"
+  tournament: "data/signals_v2/live.parquet"
+  submission: "submission_signals.csv"
+
+targets:
+  column: "target"
+
+seed: 42
+
+models:
+  lgb_ensemble_seeds: [42, 43, 44, 45, 46]
+  include_ridge: false
+  include_mlp: false
+  aggregator: mean
+
+prediction:
+  rank: true
+  rank_by_era: true

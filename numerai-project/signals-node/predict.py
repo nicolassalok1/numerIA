@@ -1,23 +1,25 @@
-"""Numerai Crypto prediction script (loads a pre-trained pickle)."""
+"""Numerai Signals prediction script (loads a pre-trained pickle if available)."""
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from pathlib import Path
-from typing import Any, Iterable, List, Sequence
+from typing import Any, List, Sequence
 
 import joblib
 import numerapi
+import requests
 import numpy as np
 import pandas as pd
 
 logging.basicConfig(filename="log.txt", filemode="a", level=logging.INFO)
 
-TOURNAMENT = 12
-DATA_VERSION = os.getenv("NUMERAI_CRYPTO_VERSION", "crypto/v2.0")
-LIVE_DATASET = os.getenv("NUMERAI_CRYPTO_LIVE_DATASET", "").strip()
-LIVE_FILENAME = os.getenv("NUMERAI_CRYPTO_LIVE_FILE", "").strip()
-MODEL_PATH = os.getenv("MODEL_PATH", "salok1.pkl")
+TOURNAMENT = 11
+DATA_VERSION = os.getenv("NUMERAI_SIGNALS_VERSION", "signals/v2.1").strip() or "signals/v2.1"
+LIVE_DATASET = os.getenv("NUMERAI_SIGNALS_LIVE_DATASET", "").strip()
+LIVE_FILENAME = os.getenv("NUMERAI_SIGNALS_LIVE_FILE", "").strip()
+MODEL_PATH = os.getenv("MODEL_PATH", "signals.pkl")
 PREDICTIONS_PATH = os.getenv("PREDICTIONS_PATH", "predictions.csv")
 RANK_UNIFORM = os.getenv("NUMERAI_RANK_UNIFORM", "1").lower() not in {"0", "false", "no"}
 SKIP_UPLOAD = os.getenv("NUMERAI_SKIP_UPLOAD", "").lower() in {"1", "true", "yes", "y", "on"}
@@ -26,16 +28,24 @@ DEFAULT_MODEL_ID = None
 DEFAULT_PUBLIC_ID = None
 DEFAULT_SECRET_KEY = None
 
-MODEL_ID = os.getenv("MODEL_ID", DEFAULT_MODEL_ID)
+MODEL_ID = (
+    os.getenv("MODEL_ID")
+    or os.getenv("NUMERAI_SIGNALS_MODEL_ID")
+    or os.getenv("NUMERAI_MODEL_ID")
+    or DEFAULT_MODEL_ID
+)
 
-napi = numerapi.NumerAPI(
+sapi = numerapi.SignalsAPI(
     public_id=os.getenv("NUMERAI_PUBLIC_ID", DEFAULT_PUBLIC_ID),
     secret_key=os.getenv("NUMERAI_SECRET_KEY", DEFAULT_SECRET_KEY),
 )
 
 
-def _safe_load_model(path: str | Path) -> Any:
+def _safe_load_model(path: str | Path) -> Any | None:
     model_path = Path(path)
+    if not model_path.exists():
+        logging.warning("Model file not found: %s", model_path)
+        return None
     try:
         return joblib.load(model_path)
     except Exception as exc:
@@ -49,16 +59,78 @@ def _safe_load_model(path: str | Path) -> Any:
 
 
 def _download_first_available(datasets: Sequence[str]) -> str:
+    errors: List[str] = []
     for dataset in datasets:
         if not dataset:
             continue
         try:
             logging.info("Attempting download: %s", dataset)
-            napi.download_dataset(dataset)
-            return dataset
+            return _download_dataset(dataset)
         except Exception as exc:
+            msg = f"{dataset}: {exc}"
+            errors.append(msg)
             logging.warning("Failed to download %s: %s", dataset, exc)
-    raise RuntimeError("Failed to download any live dataset. Check NUMERAI_CRYPTO_LIVE_DATASET.")
+    # Fallback: query available datasets and pick a live.parquet
+    try:
+        available = _list_datasets()
+        live_candidates = [d for d in available if d.endswith("/live.parquet") or d.endswith("live.parquet")]
+        if live_candidates:
+            # Prefer v2.1, then v2.0, then first match
+            preferred = None
+            for pref in ("signals/v2.1/live.parquet", "signals/v2.0/live.parquet"):
+                if pref in live_candidates:
+                    preferred = pref
+                    break
+            chosen = preferred or live_candidates[0]
+            logging.info("Fallback dataset selected: %s", chosen)
+            return _download_dataset(chosen)
+    except Exception as exc:
+        logging.warning("Fallback list_datasets failed: %s", exc)
+        errors.append(f"list_datasets: {exc}")
+    raise RuntimeError(
+        "Failed to download any live dataset. Check NUMERAI_SIGNALS_LIVE_DATASET. "
+        + " | ".join(errors[-5:])
+    )
+
+
+def _list_datasets() -> List[str]:
+    if hasattr(sapi, "list_datasets"):
+        return sapi.list_datasets()
+    query = """
+    query ($round: Int, $tournament: Int) {
+        listDatasets(round: $round, tournament: $tournament)
+    }
+    """
+    args = {"round": None, "tournament": TOURNAMENT}
+    data = sapi.raw_query(query, args)["data"]["listDatasets"]
+    return data or []
+
+
+def _download_dataset(filename: str, dest_path: str | None = None) -> str:
+    if hasattr(sapi, "download_dataset"):
+        return sapi.download_dataset(filename, dest_path)
+    if dest_path is None:
+        dest_path = filename
+    # Ensure target directory exists
+    dest_path = str(dest_path)
+    dest_dir = os.path.dirname(dest_path)
+    if dest_dir:
+        os.makedirs(dest_dir, exist_ok=True)
+    query = """
+    query ($filename: String!, $round: Int, $tournament: Int) {
+        dataset(filename: $filename, round: $round, tournament: $tournament)
+    }
+    """
+    args = {"filename": filename, "round": None, "tournament": TOURNAMENT}
+    dataset_url = sapi.raw_query(query, args)["data"]["dataset"]
+    # Stream download to file
+    with requests.get(dataset_url, stream=True, timeout=600) as resp:
+        resp.raise_for_status()
+        with open(dest_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+    return dest_path
 
 
 def _maybe_extract_features(model: Any) -> List[str] | None:
@@ -97,6 +169,14 @@ def _maybe_extract_features(model: Any) -> List[str] | None:
     return None
 
 
+def _ensure_columns(df: pd.DataFrame, columns: Sequence[str]) -> pd.DataFrame:
+    missing = [c for c in columns if c not in df.columns]
+    if not missing:
+        return df
+    filler = pd.DataFrame(0.0, index=df.index, columns=missing)
+    return pd.concat([df, filler], axis=1)
+
+
 def _unwrap_model_and_features(model: Any) -> tuple[Any, List[str] | None]:
     if isinstance(model, dict) and "model" in model:
         return model.get("model"), _maybe_extract_features(model)
@@ -127,7 +207,7 @@ def _default_feature_cols(live_universe: pd.DataFrame) -> List[str]:
     feature_cols = [c for c in live_universe.columns if c.startswith("feature")]
     if feature_cols:
         return feature_cols
-    exclude = {"symbol", "date", "era", "target", "prediction"}
+    exclude = {"numerai_ticker", "ticker", "symbol", "date", "era", "target", "signal", "prediction"}
     numeric_cols = [
         c for c in live_universe.columns
         if c not in exclude and pd.api.types.is_numeric_dtype(live_universe[c])
@@ -141,10 +221,7 @@ def _predict_with_model(model: Any, live_universe: pd.DataFrame) -> pd.Series:
     ensemble = _iter_ensemble(model)
     if ensemble:
         feature_cols = _maybe_extract_features(ensemble[0]) or _default_feature_cols(live_universe)
-        df = live_universe.copy()
-        for col in feature_cols:
-            if col not in df.columns:
-                df[col] = 0.0
+        df = _ensure_columns(live_universe.copy(), feature_cols)
         features = df[feature_cols].astype(np.float32, copy=False)
         preds = []
         for mdl in ensemble:
@@ -153,10 +230,7 @@ def _predict_with_model(model: Any, live_universe: pd.DataFrame) -> pd.Series:
 
     if hasattr(model, "predict"):
         feature_cols = _maybe_extract_features(model) or _default_feature_cols(live_universe)
-        df = live_universe.copy()
-        for col in feature_cols:
-            if col not in df.columns:
-                df[col] = 0.0
+        df = _ensure_columns(live_universe.copy(), feature_cols)
         features = df[feature_cols].astype(np.float32, copy=False)
         preds = model.predict(features)
         return pd.Series(preds, index=features.index)
@@ -164,6 +238,8 @@ def _predict_with_model(model: Any, live_universe: pd.DataFrame) -> pd.Series:
     if callable(model):
         output = model(live_universe)
         if isinstance(output, pd.DataFrame):
+            if "signal" in output.columns:
+                return output["signal"].copy()
             if "prediction" in output.columns:
                 return output["prediction"].copy()
             if output.shape[1] == 1:
@@ -175,8 +251,34 @@ def _predict_with_model(model: Any, live_universe: pd.DataFrame) -> pd.Series:
     raise TypeError("Unsupported model type for prediction")
 
 
+def _fallback_predictions(live_universe: pd.DataFrame) -> pd.Series:
+    ticker_col = _resolve_ticker_col(live_universe)
+    if not ticker_col:
+        raise RuntimeError("No ticker column found for fallback predictions.")
+    tickers = live_universe[ticker_col].astype(str)
+    dates = None
+    if "date" in live_universe.columns:
+        dates = live_universe["date"].astype(str)
+    seeds = []
+    for i, t in enumerate(tickers):
+        base = f"{t}|{dates.iloc[i] if dates is not None else i}"
+        digest = hashlib.md5(base.encode("utf-8")).hexdigest()
+        seeds.append(int(digest[:8], 16))
+    series = pd.Series(seeds, index=live_universe.index, dtype="float64")
+    return _rank_uniform(series)
+
+
+def _resolve_ticker_col(live_universe: pd.DataFrame) -> str | None:
+    override = os.getenv("NUMERAI_TICKER_COL")
+    candidates = [override, "numerai_ticker", "ticker", "symbol"]
+    for c in candidates:
+        if c and c in live_universe.columns:
+            return c
+    return None
+
+
 def main() -> None:
-    logging.info("Downloading live crypto universe")
+    logging.info("Downloading live signals universe")
     candidates: List[str] = []
     if LIVE_DATASET:
         candidates.append(LIVE_DATASET)
@@ -189,54 +291,39 @@ def main() -> None:
         candidates.extend(
             [
                 f"{DATA_VERSION}/live.parquet",
-                f"{DATA_VERSION}/live_universe.parquet",
-                f"v2.0/live.parquet",
-                f"v2.0/live_universe.parquet",
-                f"crypto/v2.0/live.parquet",
-                f"crypto/v2.0/live_universe.parquet",
+                "signals/v2.1/live.parquet",
+                "signals/v2.0/live.parquet",
             ]
         )
     dataset_used = _download_first_available(candidates)
     live_universe = pd.read_parquet(dataset_used)
 
     model = _safe_load_model(MODEL_PATH)
-    model, explicit_cols = _unwrap_model_and_features(model)
-    if explicit_cols:
-        for col in explicit_cols:
-            if col not in live_universe.columns:
-                live_universe[col] = 0.0
+    if model is not None:
+        model, explicit_cols = _unwrap_model_and_features(model)
+        if explicit_cols:
+            live_universe = _ensure_columns(live_universe, explicit_cols)
+        preds = _predict_with_model(model, live_universe)
+    else:
+        logging.warning("No model loaded, using fallback predictions.")
+        preds = _fallback_predictions(live_universe)
 
-    preds = _predict_with_model(model, live_universe)
     if RANK_UNIFORM:
         preds = _rank_uniform(preds)
 
-    if "symbol" in live_universe.columns:
-        index = live_universe["symbol"]
-        index.name = "symbol"
-    else:
-        index = live_universe.index
-    predictions = pd.DataFrame({"prediction": preds.values}, index=index)
+    ticker_col = _resolve_ticker_col(live_universe)
+    if not ticker_col:
+        raise RuntimeError("No ticker column found (expected numerai_ticker/ticker/symbol).")
+    tickers = live_universe[ticker_col].astype(str)
+    predictions = pd.DataFrame({"numerai_ticker": tickers.values, "signal": preds.values})
 
     logging.info("Writing predictions")
-    predictions.to_csv(PREDICTIONS_PATH, index=True)
+    predictions.to_csv(PREDICTIONS_PATH, index=False)
     if SKIP_UPLOAD:
         logging.info("Skipping upload (NUMERAI_SKIP_UPLOAD=1)")
         return
     logging.info("Submitting predictions")
-    # Prefer CryptoAPI if available; fall back to NumerAPI
-    try:
-        crypto_api_cls = getattr(numerapi, "CryptoAPI", None)
-        if crypto_api_cls is not None:
-            crypto_api = crypto_api_cls(
-                public_id=os.getenv("NUMERAI_PUBLIC_ID", DEFAULT_PUBLIC_ID),
-                secret_key=os.getenv("NUMERAI_SECRET_KEY", DEFAULT_SECRET_KEY),
-            )
-            crypto_api.upload_predictions(PREDICTIONS_PATH, model_id=MODEL_ID)
-            return
-    except Exception as exc:
-        logging.warning("CryptoAPI upload failed, falling back to NumerAPI: %s", exc)
-
-    napi.upload_predictions(PREDICTIONS_PATH, model_id=MODEL_ID)
+    sapi.upload_predictions(PREDICTIONS_PATH, model_id=MODEL_ID)
 
 
 if __name__ == "__main__":

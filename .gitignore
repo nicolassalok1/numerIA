@@ -43,6 +43,16 @@ aws/*.tfstate.backup
 aws/lambda.zip
 aws/.terraform.lock.hcl
 
+# LightGBM build artifacts & source (compiled locally, not project code)
+lightgbm/
+lightgbm_gpu_build/
+
+# Temp / scratch
+.tmp/
+*.temp
+tf_schema.json
+lis-moi
+
 # OS noise
 .DS_Store
 Thumbs.db

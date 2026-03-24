@@ -1,7 +1,0 @@
-D:/PythonDProjects/numerAI/lightgbm/CMakeFiles/lightgbm_objs.dir
-D:/PythonDProjects/numerAI/lightgbm/CMakeFiles/lightgbm.dir
-D:/PythonDProjects/numerAI/lightgbm/CMakeFiles/lightgbm_capi_objs.dir
-D:/PythonDProjects/numerAI/lightgbm/CMakeFiles/_lightgbm.dir
-D:/PythonDProjects/numerAI/lightgbm/CMakeFiles/INSTALL.dir
-D:/PythonDProjects/numerAI/lightgbm/CMakeFiles/ALL_BUILD.dir
-D:/PythonDProjects/numerAI/lightgbm/CMakeFiles/ZERO_CHECK.dir

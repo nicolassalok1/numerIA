@@ -143,11 +143,17 @@ def load_features(models_dir: Path, training_cfg: Dict[str, Any], features_cfg: 
             requested_feature_cols = requested_feature_cols[: int(feature_limit)]
 
     available_feature_cols = [c for c in requested_feature_cols if c in (schema_cols or [])]
-    id_candidates = ["id", "prediction_id", "row_id", "tournament_id"]
+    id_candidates = ["id", "prediction_id", "row_id", "tournament_id", "symbol"]
     id_col = next((c for c in id_candidates if c in schema_cols), None) if schema_cols else None
+    era_col = None
+    if schema_cols:
+        if "era" in schema_cols:
+            era_col = "era"
+        elif "date" in schema_cols:
+            era_col = "date"
     columns_to_read = available_feature_cols + ([id_col] if id_col else [])
-    if schema_cols and "era" in schema_cols:
-        columns_to_read.append("era")
+    if era_col:
+        columns_to_read.append(era_col)
     df = utils.safe_read_parquet(tournament_path, columns=columns_to_read or None)
     if id_col and id_col not in df.columns and df.index.name == id_col:
         df = df.reset_index()
@@ -156,6 +162,9 @@ def load_features(models_dir: Path, training_cfg: Dict[str, Any], features_cfg: 
         utils.log("Tournament data missing or feature columns not found; using dummy data.")
         df, _ = utils.dummy_dataset(prefix=feature_prefix)
         requested_feature_cols = utils.get_feature_columns(df, feature_prefix)
+
+    if not requested_feature_cols:
+        requested_feature_cols = utils.infer_feature_columns(df, prefix=feature_prefix)
 
     if id_col is None:
         for candidate in id_candidates:
@@ -175,7 +184,12 @@ def load_features(models_dir: Path, training_cfg: Dict[str, Any], features_cfg: 
         df[c] = 0.0
 
     features_df = df[list(requested_feature_cols)].astype(np.float32, copy=False)
-    eras = df["era"].reset_index(drop=True) if "era" in df.columns else None
+    if "era" in df.columns:
+        eras = df["era"].reset_index(drop=True)
+    elif "date" in df.columns:
+        eras = df["date"].astype(str).reset_index(drop=True)
+    else:
+        eras = None
     del df
     return features_df, ids, eras, Path(tournament_path)
 
@@ -303,7 +317,8 @@ def predict(models_dir: Path, training_cfg: Dict[str, Any], params_cfg: Dict[str
         else:
             final_pred = base_pred_df.mean(axis=1)
 
-    submission = pd.DataFrame({"id": ids, "prediction": final_pred.values})
+    id_name = ids.name or "id"
+    submission = pd.DataFrame({id_name: ids, "prediction": final_pred.values})
 
     # Feature neutralization: reduce feature exposure for better Sharpe
     pred_cfg = (training_cfg.get("prediction", {}) or {})
