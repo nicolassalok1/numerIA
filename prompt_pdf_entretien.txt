@@ -1,0 +1,193 @@
+Génère-moi un document PDF structuré et détaillé (en français) qui explique le projet "numerIA" — un pipeline de machine learning automatisé pour le tournoi Numerai. Ce document doit être présenté de façon professionnelle pour que je puisse m'en servir comme support de révision avant un entretien technique. Utilise des schémas textuels (diagrammes ASCII), des tableaux et une structure claire avec sommaire.
+
+Voici toutes les informations du projet :
+
+---
+
+## 1. VUE D'ENSEMBLE
+
+numerIA est un pipeline ML end-to-end automatisé pour participer au tournoi Numerai (hedge fund décentralisé). Le projet couvre : l'ingénierie des features, l'entraînement de modèles ensemblistes, la prédiction, le déploiement cloud (AWS) et la soumission automatique aux 3 tournois Numerai (Classic, Signals, Crypto) via 4 nœuds de prédiction.
+
+## 2. ARCHITECTURE 3 TIERS
+
+### Tier 1 — Développement local (Windows 11 + GPU RTX 4060)
+- Entraînement des modèles avec CUDA 12.6
+- Feature engineering et preprocessing
+- Environnement Conda "lgbm-gpu" (Python 3.10/3.11)
+- Automatisation via scripts PowerShell
+
+### Tier 2 — Conteneurisation (Docker + numerai-cli)
+- 4 nœuds cloud indépendants (Classic, Signals, Crypto, TGRV2)
+- Chaque nœud = Dockerfile + predict.py + modèle .pkl pré-entraîné
+- Images Python 3.11 légères pour la prédiction
+
+### Tier 3 — Cloud AWS (Terraform)
+- EC2 Spot GPU (g4dn.xlarge, Tesla T4) pour l'entraînement cloud
+- Lambda comme déclencheur (démarre l'instance EC2)
+- EventBridge pour le scheduling (cron hebdomadaire, samedi 18h UTC)
+- ECR pour le stockage des images Docker
+- Secrets Manager pour les clés API Numerai
+- S3 pour les artefacts (rétention 90 jours)
+- CloudWatch pour les logs
+- Coût estimé : ~0.40-0.80€ par exécution hebdomadaire
+
+### Diagramme d'architecture :
+
+EventBridge (cron hebdomadaire)
+    → Lambda (démarre EC2)
+        → EC2 Spot GPU (Deep Learning AMI)
+            → docker pull depuis ECR
+            → docker run avec GPU + Secrets
+            → entrypoint.sh : download data → train → predict → upload Numerai → upload S3
+            → auto-termination
+
+## 3. PIPELINE D'ENTRAÎNEMENT (train.py)
+
+Étapes séquentielles :
+1. Chargement des configs YAML (training.yaml, program_input_params.yaml, features.yaml)
+2. Chargement des données Numerai (numerai_training_data.parquet, ~300k lignes, ~2000 features)
+3. Sélection des features : filtrage par ratio NA (max 10%), corrélation minimale, cap max
+4. Feature engineering :
+   - Row stats : mean, std, min, max, range + 5 bin counts (11 features)
+   - Group stats : 8 groupes, mean/std par groupe (16 features)
+   - Interactions : 10 paires de différences (10 features)
+   - Total : ~37 features créées
+5. Cross-validation temporelle (era-based) :
+   - 5 folds avec embargo de 4 eras (évite le data leakage temporel)
+   - Holdout de 50 eras les plus récentes
+6. Entraînement de l'ensemble par cible :
+   - 5 modèles LightGBM (seeds 42-46)
+   - 1 modèle XGBoost (seed 42)
+   - Optionnel : Ridge, MLP
+7. Stacking : Ridge regression sur les prédictions OOF
+8. Sauvegarde : modèles .pkl + metadata (model_spec.json, feature_columns.json)
+
+## 4. MODÈLES ML UTILISÉS
+
+### Modèles de base :
+- **LightGBM** (principal, leaf-wise) : num_leaves=512, min_data_in_leaf=3000, lambda_l2=10.0, feature_fraction=0.1, bagging_fraction=0.7, learning_rate=0.005, n_estimators=10000 + early stopping à 200 rounds, device=gpu
+- **XGBoost** (diversité, level-wise) : paramètres mappés depuis LightGBM, tree_method=gpu_hist
+- **Ridge** (baseline linéaire, optionnel)
+- **MLP** (réseau de neurones, optionnel, scikit-learn MLPRegressor)
+
+### Agrégation :
+- **Stacker** : Ridge regression entraîné sur les prédictions out-of-fold — apprend les poids optimaux de chaque modèle de base
+- **Fallback** : moyenne simple si stacker non disponible
+
+### Multi-Target :
+- Détection automatique de toutes les colonnes target_*
+- Cap à 20 cibles max
+- Ensemble séparé par cible
+- Blending pondéré par Sharpe ratio (sharpe_weighted) ou moyenne
+- Exclusion des cibles sous min_target_sharpe=0.15
+
+## 5. POST-PROCESSING
+
+- **Ranking** : conversion des prédictions en percentiles [0,1] par era (distribution uniforme)
+- **Neutralisation des features** : projection least-squares pour supprimer la corrélation des prédictions avec les features individuelles (neutralize_proportion=0.5)
+  → Objectif : réduire l'exposition aux features et améliorer la généralisation
+
+## 6. PIPELINE DE PRÉDICTION (predict.py)
+
+1. Chargement de tous les modèles de base depuis models/
+2. Chargement du stacker (Ridge)
+3. Chargement des données live (numerai_tournament_data.parquet)
+4. Application du feature engineering (mêmes settings que l'entraînement)
+5. Pour chaque cible : prédiction → stacking → neutralisation → ranking
+6. Export submission.csv + upload via NumerAPI
+
+## 7. OPTIMISATION DES HYPERPARAMÈTRES
+
+- **Optuna** : 50 trials par défaut
+- **Objectif** : Sharpe ratio moyen par era sur le holdout
+- **CV temporelle** : respecte l'ordre des eras
+- **Sortie** : config/optimized_params.yaml
+
+## 8. TOURNOIS NUMERAI
+
+| Tournoi | Type | ID | Données | Soumission |
+|---------|------|----|---------|-----------|
+| Classic (t8) | Régression tabulaire | v5.2 | ~300k lignes, ~2000 features | prediction.csv |
+| Signals (t11) | Ranking actions | v2.1 | ~7000 tickers, features custom | signals.csv |
+| Crypto (t12) | Ranking crypto | v2.0 | ~100+ assets | submission |
+
+### Concepts clés Numerai :
+- **Era** : période temporelle (hebdomadaire Classic, quotidien Signals)
+- **Target** : label de rendement cryptographiquement obscurci
+- **Sharpe Ratio** : métrique principale (corrélation par era, ajustée au risque)
+- **Corrélation** : mesure entre prédictions et target réel
+- **Staking NMR** : allocation de tokens pour recevoir des paiements
+- **Neutralisation** : décorrélation des features pour stabilité
+
+## 9. NŒUDS DE PRÉDICTION CLOUD (4 nœuds)
+
+| Nœud | Tournoi | Modèle | Fonctionnement |
+|------|---------|--------|---------------|
+| classic-node | Classic (t8) | salok1_classic.pkl | Download live data → predict → rank → upload |
+| signals-node | Signals (t11) | signals.pkl | Download signals data → predict par ticker → upload |
+| crypto-node | Crypto (t12) | salok1.pkl | Download crypto data → predict → upload |
+| tgrv2-node | Classic (t8) | tgrv2.pkl | Variante TGRV2, même flow que Classic |
+
+Chaque nœud : Dockerfile (Python 3.11) + predict.py + modèle .pkl + requirements.txt
+Déclenchement automatique via webhook Numerai (quotidien après test initial)
+
+## 10. AUTOMATISATION
+
+### Scripts PowerShell locaux :
+- run_me.ps1 : pipeline complet (train + predict + upload)
+- daily_full_setup.ps1 : config + train + deploy + test des 4 nœuds
+- daily_retrain_deploy.ps1 : retrain + deploy sans config/test
+- health_check.ps1 : test des 4 nœuds
+- setup_plug_and_play.ps1 : installation one-command
+
+### Infrastructure as Code :
+- Terraform (aws/main.tf) pour tout le provisioning AWS
+- deploy.sh / deploy.ps1 pour le déploiement
+
+## 11. DIAGNOSTICS ET ÉVALUATION (diagnostics.py)
+
+Métriques calculées :
+- Corrélation par era
+- Sharpe ratio (corrélation moyenne / écart-type)
+- Max drawdown
+- Exposition aux features
+- Stabilité temporelle
+
+## 12. STRUCTURE DU PROJET
+
+numerIA/
+├── numerai-project/
+│   ├── src/           # 13 modules Python (train, predict, models, utils...)
+│   ├── config/        # Fichiers YAML de configuration
+│   ├── classic-node/  # Nœud Classic
+│   ├── signals-node/  # Nœud Signals
+│   ├── crypto-node/   # Nœud Crypto
+│   ├── tgrv2-node/    # Nœud TGRV2
+│   ├── Dockerfile     # Image GPU principale
+│   ├── entrypoint.sh  # Point d'entrée AWS
+│   └── README.md
+├── aws/               # Terraform (main.tf, variables.tf, outputs.tf)
+├── run_me.ps1         # Pipeline local
+├── daily_*.ps1        # Automatisation quotidienne
+└── health_check.ps1   # Santé des nœuds
+
+---
+
+Formate ce document de manière professionnelle avec :
+- Un sommaire cliquable en début de document
+- Des encadrés pour les points clés
+- Des diagrammes ASCII pour l'architecture et les flows
+- Des tableaux récapitulatifs
+- Une section "Questions d'entretien possibles et réponses" à la fin couvrant :
+  1. Pourquoi un ensemble multi-modèles plutôt qu'un seul modèle ?
+  2. Comment évites-tu le data leakage temporel ?
+  3. Pourquoi la neutralisation des features ?
+  4. Comment gères-tu les coûts cloud ?
+  5. Quelle est ta stratégie de validation ?
+  6. Comment assures-tu la reproductibilité ?
+  7. Pourquoi LightGBM comme modèle principal ?
+  8. Comment gères-tu le déploiement automatique ?
+  9. Quelle est la différence entre les tournois Classic, Signals et Crypto ?
+  10. Comment optimises-tu les hyperparamètres ?
+
+Le document doit faire entre 15 et 20 pages et être prêt à imprimer en PDF.
