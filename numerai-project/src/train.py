@@ -141,17 +141,26 @@ def select_feature_columns(
         candidates = [c for c, is_num in zip(candidates, numeric_mask) if is_num]
     X = df_sample[candidates].to_numpy(dtype=np.float32, copy=False)
     y = df_sample[target_col].to_numpy(dtype=np.float32, copy=False)
-    y_centered = y - float(y.mean())
-    y_std = float(y_centered.std())
-    if y_std == 0.0:
+    # Drop rows where target is NaN so correlations are meaningful
+    valid = ~np.isnan(y)
+    if valid.sum() < 10:
         corrs = np.zeros(X.shape[1], dtype=np.float64)
     else:
-        x_std = X.std(axis=0).astype(np.float64, copy=False)
-        denom = x_std * y_std
-        denom[denom == 0.0] = np.nan
-        cov = (X.T @ y_centered) / max(1, (X.shape[0] - 1))
-        corrs = (cov.astype(np.float64, copy=False) / denom)
-        corrs = np.nan_to_num(corrs, nan=0.0, posinf=0.0, neginf=0.0)
+        X = X[valid]
+        y = y[valid]
+        y_centered = y - float(y.mean())
+        y_std = float(y_centered.std())
+        if y_std == 0.0:
+            corrs = np.zeros(X.shape[1], dtype=np.float64)
+        else:
+            x_std = np.nanstd(X, axis=0).astype(np.float64, copy=False)
+            denom = x_std * y_std
+            denom[denom == 0.0] = np.nan
+            # Replace NaN in X with 0 for dot product
+            X_clean = np.nan_to_num(X, nan=0.0)
+            cov = (X_clean.T @ y_centered) / max(1, (X.shape[0] - 1))
+            corrs = (cov.astype(np.float64, copy=False) / denom)
+            corrs = np.nan_to_num(corrs, nan=0.0, posinf=0.0, neginf=0.0)
 
     abs_corr = np.abs(corrs)
     order = np.argsort(-abs_corr)
