@@ -9,10 +9,10 @@ $env:PYTHONIOENCODING = "utf-8"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $env:HTTP_PROXY=""; $env:HTTPS_PROXY=""; $env:ALL_PROXY=""
 
-# Model names (Numerai dashboard)
-$ClassicModel = "salok1_classic"
-$SignalsModel = "salok1_signals"
-$CryptoModel  = "salok1"
+# Model names (must match nodes.json / Numerai dashboard)
+$ClassicModel = "tgrv2"
+$SignalsModel = "tgr_sig"
+$CryptoModel  = "tgr_cry"
 
 # Locate numerai CLI
 $numeraiCmd = Get-Command numerai -ErrorAction SilentlyContinue

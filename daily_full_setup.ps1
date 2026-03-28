@@ -16,20 +16,17 @@ $env:PYTHONIOENCODING = "utf-8"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $env:HTTP_PROXY=""; $env:HTTPS_PROXY=""; $env:ALL_PROXY=""
 
-# Model names + IDs
-$ClassicModel   = "salok1_classic"
-$ClassicModelId = "c3a95af2-14f3-44a8-8ec7-d5d4fca28a93"
-$SignalsModel   = "salok1_signals"
-$SignalsModelId = "d8c538bd-ddfa-4456-8506-ab0cc8ef1c55"
-$CryptoModel    = "salok1"
-$CryptoModelId  = "ea40cb4a-a4a2-4434-8ff1-929a4c5c2673"
-$Tgrv2Model     = "tgrv2"
-$Tgrv2ModelId   = "f35f60cf-6784-45e5-a10c-2f348b6bb2a5"
+# Model names + IDs (must match nodes.json / Numerai dashboard)
+$ClassicModel   = "tgrv2"
+$ClassicModelId = "f35f60cf-6784-45e5-a10c-2f348b6bb2a5"
+$SignalsModel   = "tgr_sig"
+$SignalsModelId = "d19eb070-251a-4fbd-8acf-60893d6848d0"
+$CryptoModel    = "tgr_cry"
+$CryptoModelId  = "c574308c-e4d7-4849-886b-aa7377560791"
 
-$ClassicNodeDir = Join-Path $ScriptDir "numerai-project\classic-node"
+$ClassicNodeDir = Join-Path $ScriptDir "numerai-project\tgrv2-node"
 $SignalsNodeDir = Join-Path $ScriptDir "numerai-project\signals-node"
 $CryptoNodeDir  = Join-Path $ScriptDir "numerai-project\crypto-node"
-$Tgrv2NodeDir   = Join-Path $ScriptDir "numerai-project\tgrv2-node"
 
 # Locate numerai CLI
 $numeraiCmd = Get-Command numerai -ErrorAction SilentlyContinue
@@ -87,7 +84,6 @@ if (-not $SkipConfig) {
     Ensure-NodeConfig -ModelName $ClassicModel -ModelId $ClassicModelId -Tournament 8 -NodeDir $ClassicNodeDir
     Ensure-NodeConfig -ModelName $SignalsModel -ModelId $SignalsModelId -Tournament 11 -NodeDir $SignalsNodeDir
     Ensure-NodeConfig -ModelName $CryptoModel -ModelId $CryptoModelId -Tournament 12 -NodeDir $CryptoNodeDir
-    Ensure-NodeConfig -ModelName $Tgrv2Model -ModelId $Tgrv2ModelId -Tournament 8 -NodeDir $Tgrv2NodeDir
 }
 
 Write-Host "=== Classic: train + pickle ==="
@@ -100,7 +96,7 @@ Write-Host "=== Crypto: train + pickle ==="
 & (Join-Path $ScriptDir "run_crypto_v2.ps1")
 
 if (-not $SkipDeploy) {
-    Write-Host "=== Deploy Classic node ==="
+    Write-Host "=== Deploy Classic (TGRV2) node ==="
     & $numeraiExe node -m $ClassicModel -t 8 deploy -v
 
     Write-Host "=== Deploy Signals node ==="
@@ -108,13 +104,10 @@ if (-not $SkipDeploy) {
 
     Write-Host "=== Deploy Crypto node ==="
     & $numeraiExe node -m $CryptoModel -t 12 deploy -v
-
-    Write-Host "=== Deploy TGRV2 node ==="
-    & $numeraiExe node -m $Tgrv2Model -t 8 deploy -v
 }
 
 if (-not $SkipTest) {
-    Write-Host "=== Test Classic node ==="
+    Write-Host "=== Test Classic (TGRV2) node ==="
     & $numeraiExe node -m $ClassicModel -t 8 test -v
 
     Write-Host "=== Test Signals node ==="
@@ -122,9 +115,6 @@ if (-not $SkipTest) {
 
     Write-Host "=== Test Crypto node ==="
     & $numeraiExe node -m $CryptoModel -t 12 test -v
-
-    Write-Host "=== Test TGRV2 node ==="
-    & $numeraiExe node -m $Tgrv2Model -t 8 test -v
 }
 
 if ($ScheduleTime) {

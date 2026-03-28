@@ -160,6 +160,12 @@ def align_lightgbm_aliases(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
         # Both set: keep primary as source of truth, drop alias to silence warnings
         aligned.pop(alias, None)
+    # LightGBM GPU only supports max_bin <= 255
+    if str(aligned.get("device_type", "")).lower() == "gpu":
+        max_bin = int(aligned.get("max_bin", 255))
+        if max_bin > 255:
+            log(f"GPU mode: capping max_bin from {max_bin} to 255")
+            aligned["max_bin"] = 255
     return aligned
 
 

@@ -133,6 +133,12 @@ def select_feature_columns(
         df_sample = df_train
         utils.log(f"Feature corr computed on full rows: {len(df_sample)}")
 
+    # Drop non-numeric columns (e.g. country codes in Signals data)
+    numeric_mask = df_sample[candidates].dtypes.apply(lambda dt: np.issubdtype(dt, np.number))
+    non_numeric = [c for c, is_num in zip(candidates, numeric_mask) if not is_num]
+    if non_numeric:
+        utils.log(f"Dropped {len(non_numeric)} non-numeric feature(s): {non_numeric[:5]}")
+        candidates = [c for c, is_num in zip(candidates, numeric_mask) if is_num]
     X = df_sample[candidates].to_numpy(dtype=np.float32, copy=False)
     y = df_sample[target_col].to_numpy(dtype=np.float32, copy=False)
     y_centered = y - float(y.mean())
@@ -286,6 +292,8 @@ def prepare_training_frame(training_cfg: Dict[str, Any], features_cfg: Dict[str,
         target_col = utils.find_target_column(df.columns)
 
     feature_cols = [c for c in feature_cols if c in df.columns]
+    # Drop non-numeric feature columns (e.g. country codes in Signals data)
+    feature_cols = [c for c in feature_cols if np.issubdtype(df[c].dtype, np.number)]
     if not feature_cols:
         feature_cols = utils.infer_feature_columns(df, prefix=feature_prefix, target_col=target_col)
     if not feature_cols:
@@ -702,10 +710,14 @@ def main() -> None:
     df_holdout = df.iloc[holdout_start:].copy()
     del df_train_view
 
-    # Cast features to float32
-    df_train[feature_cols] = df_train[feature_cols].astype(np.float32, copy=False)
+    # Cast features to float32 (column-by-column to avoid memory spikes)
+    for col in feature_cols:
+        if df_train[col].dtype != np.float32:
+            df_train[col] = df_train[col].astype(np.float32)
     if not df_holdout.empty:
-        df_holdout[feature_cols] = df_holdout[feature_cols].astype(np.float32, copy=False)
+        for col in feature_cols:
+            if df_holdout[col].dtype != np.float32:
+                df_holdout[col] = df_holdout[col].astype(np.float32)
 
     del df
 

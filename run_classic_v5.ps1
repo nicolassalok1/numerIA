@@ -162,3 +162,12 @@ if (Test-Path $classicNodeDir) {
 else {
     Write-Warning "classic-node not found at $classicNodeDir. Copy manually."
 }
+
+$tgrv2NodeDir = Join-Path $RootDir "tgrv2-node"
+if (Test-Path $tgrv2NodeDir) {
+    Copy-Item -Path (Join-Path $RootDir "salok1_classic.pkl") -Destination (Join-Path $tgrv2NodeDir "tgrv2.pkl") -Force
+    Write-Host "Copied salok1_classic.pkl to $tgrv2NodeDir as tgrv2.pkl"
+}
+else {
+    Write-Warning "tgrv2-node not found at $tgrv2NodeDir. Copy manually."
+}

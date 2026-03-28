@@ -26,7 +26,11 @@ DEFAULT_MODEL_ID = None
 DEFAULT_PUBLIC_ID = None
 DEFAULT_SECRET_KEY = None
 
-MODEL_ID = os.getenv("MODEL_ID", DEFAULT_MODEL_ID)
+MODEL_ID = (
+    os.getenv("MODEL_ID")
+    or os.getenv("NUMERAI_MODEL_ID")
+    or DEFAULT_MODEL_ID
+)
 
 napi = numerapi.NumerAPI(
     public_id=os.getenv("NUMERAI_PUBLIC_ID", DEFAULT_PUBLIC_ID),
@@ -34,8 +38,11 @@ napi = numerapi.NumerAPI(
 )
 
 
-def _safe_load_model(path: str | Path) -> Any:
+def _safe_load_model(path: str | Path) -> Any | None:
     model_path = Path(path)
+    if not model_path.exists():
+        logging.warning("Model file not found: %s", model_path)
+        return None
     try:
         return joblib.load(model_path)
     except Exception as exc:
